@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 6</title>
+  <title>Quest OBJ Viewer version 7</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 6</h1>
+        <h1>Quest OBJ Viewer version 7</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays and a polished control panel attached to the left controller. Labels are cached to stop button flicker.</span>
+          <span>Shows controller models/rays and a polished control panel attached to the left controller. Text uses fixed-opacity textures to prevent shimmer/shade changes while moving.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off. A polished clickable UI panel is attached to the left controller; point at it with the right controller and press trigger. Button labels are cached to stop flashing.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off. A polished clickable UI panel is attached to the left controller; point at it with the right controller and press trigger. Button labels use fixed-opacity, no-mipmap textures so the text should no longer change shade while moving.
       </div>
     </div>
   </div>
@@ -755,8 +755,17 @@
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy?.() || 1, 8);
+
+      // Avoid text changing shade/sharpness as the controller panel moves.
+      // Mipmap level switching on small moving UI panels can look like flicker/shimmer in XR.
+      texture.generateMipmaps = false;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.anisotropy = 1;
       texture.needsUpdate = true;
+
       uiTextureCache.set(key, texture);
       return texture;
     }
@@ -837,9 +846,11 @@
           accent: "rgba(150,240,177,0.95)",
           fontSize: 35
         }),
-        transparent: true,
+        transparent: false,
         side: THREE.DoubleSide,
-        depthTest: false
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false
       })
     );
     leftPanelTitle.position.set(0, 0.167, 0.006);
@@ -868,7 +879,9 @@
           transparent: true,
           opacity: 0.92,
           side: THREE.DoubleSide,
-          depthTest: false
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false
         })
       );
       backing.name = "button_backing";
@@ -891,13 +904,15 @@
             fontSize: 39
           }),
           color: 0xffffff,
-          transparent: true,
-          opacity: 0.98,
+          transparent: false,
+          opacity: 1.0,
           side: THREE.DoubleSide,
-          depthTest: false
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false
         })
       );
-      face.position.z = 0.003;
+      face.position.z = 0.010;
       face.name = "button_face";
       face.userData.ownerButton = button;
       button.add(face);
@@ -930,10 +945,12 @@
           fontSize: 29,
           accentBar: false
         }),
-        transparent: true,
+        transparent: false,
         side: THREE.DoubleSide,
         depthTest: false,
-        opacity: 0.96
+        depthWrite: false,
+        toneMapped: false,
+        opacity: 1.0
       })
     );
     leftUIStatus.position.set(0, -0.205, 0.010);
@@ -1006,6 +1023,10 @@
           accent,
           fontSize: 39
         });
+        face.material.opacity = 1.0;
+        face.material.transparent = false;
+        face.material.depthWrite = false;
+        face.material.toneMapped = false;
         face.material.needsUpdate = true;
       }
     }
@@ -1051,12 +1072,14 @@
         }
 
         if (face?.material) {
-          face.material.opacity = isHover ? 1.0 : 0.98;
+          // Keep text exactly the same opacity/colour at all times.
+          // Hover feedback is handled by the backing colour only, preventing text shade changes.
+          face.material.opacity = 1.0;
         }
 
-        // Smooth scale avoids flicker/jitter when the ray grazes button edges.
-        const targetScale = isHover ? 1.08 : 1.0;
-        button.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.28);
+        // Keep scaling subtle so the texture sampling does not visibly change while moving.
+        const targetScale = isHover ? 1.025 : 1.0;
+        button.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.22);
       }
     }
 
