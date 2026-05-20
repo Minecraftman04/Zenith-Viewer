@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 10</title>
+  <title>Quest OBJ Viewer version 11</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 10</h1>
+        <h1>Quest OBJ Viewer version 11</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -1330,6 +1330,12 @@
     let xrCeilingManual = false;
     let xrCeilingMarkerX = 0;
     let xrCeilingMarkerZ = 0;
+
+    // These are fixed world-space marker anchors. They are updated only when a cut
+    // height is deliberately set/nudged, not when the OBJ is moved or recentered.
+    const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
+    const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
+
     let arConfirmTimer = 0;
 
     const floorClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -1781,7 +1787,7 @@
 
     function updateCeilingMarker(visible = true) {
       ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
-      ceilingMarker.position.set(xrCeilingMarkerX, xrCeilingY - 0.006, xrCeilingMarkerZ);
+      ceilingMarker.position.copy(ceilingMarkerWorldPosition);
     }
 
     function showARConfirmation(message = "AR FLOOR SET") {
@@ -1792,7 +1798,7 @@
 
     function updateFloorMarker(visible = true) {
       floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
-      floorMarker.position.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
+      floorMarker.position.copy(floorMarkerWorldPosition);
     }
 
     function applyXRFloorPlacement() {
@@ -1800,6 +1806,8 @@
 
       if (currentObject && renderer.xr.isPresenting) {
         applyModelTransform(currentObject);
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
       }
 
       updateClippingPlanes();
@@ -1818,9 +1826,11 @@
       // If the Quest gives a real local-floor space, camera Y is usually around standing eye height.
       // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
       xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
+      floorMarkerWorldPosition.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
 
       if (!xrCeilingManual) {
         xrCeilingY = xrFloorY + 2.2;
+        ceilingMarkerWorldPosition.set(xrCeilingMarkerX, xrCeilingY - 0.006, xrCeilingMarkerZ);
       }
 
       xrFloorAutoSet = true;
@@ -1983,6 +1993,7 @@
       xrFloorY = controllerPos.y;
       xrFloorMarkerX = controllerPos.x;
       xrFloorMarkerZ = controllerPos.z;
+      floorMarkerWorldPosition.set(controllerPos.x, xrFloorY + 0.006, controllerPos.z);
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -2026,6 +2037,7 @@
       xrCeilingY = controllerPos.y;
       xrCeilingMarkerX = controllerPos.x;
       xrCeilingMarkerZ = controllerPos.z;
+      ceilingMarkerWorldPosition.set(controllerPos.x, xrCeilingY - 0.006, controllerPos.z);
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
 
@@ -2042,6 +2054,7 @@
 
     function nudgeXRCeiling(delta) {
       xrCeilingY += delta;
+      ceilingMarkerWorldPosition.y = xrCeilingY - 0.006;
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
       updateClippingPlanes();
@@ -2055,6 +2068,7 @@
 
     function nudgeXRFloor(delta) {
       xrFloorY += delta;
+      floorMarkerWorldPosition.y = xrFloorY + 0.006;
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -2419,13 +2433,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Press left Y to show/hide the control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the control panel on your left controller.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Press left Y to show/hide the control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the control panel on your left controller.`
         );
       }
     });
@@ -2442,6 +2456,12 @@
       xrCeilingY = 2.2;
       xrCeilingManual = false;
       clippingEnabledInput.checked = false;
+      floorMarkerWorldPosition.set(0, 0.006, 0);
+      ceilingMarkerWorldPosition.set(0, 2.194, 0);
+      xrFloorMarkerX = 0;
+      xrFloorMarkerZ = 0;
+      xrCeilingMarkerX = 0;
+      xrCeilingMarkerZ = 0;
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
