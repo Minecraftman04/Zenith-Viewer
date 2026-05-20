@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 8</title>
+  <title>Quest OBJ Viewer version 9</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 8</h1>
+        <h1>Quest OBJ Viewer version 9</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -460,9 +460,9 @@
       <div class="control">
         <div>
           <b>XR clipping cuts</b><br />
-          <span>When enabled, the OBJ is cut off below the calibrated floor and above the calibrated ceiling. Press the left controller <b>X</b> button to toggle this in XR.</span>
+          <span>Off until a ceiling cut is set. After setting the ceiling, press left controller <b>X</b> to toggle clipping on/off in XR.</span>
         </div>
-        <input id="clippingEnabledInput" type="checkbox" checked />
+        <input id="clippingEnabledInput" type="checkbox" />
       </div>
 
       <div class="control">
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off. A polished clickable UI panel is attached to the left controller; point at it with the right controller and press trigger. The left-controller UI is smaller, and button/text colours are fixed so they should not change shade while moving.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off. A polished clickable UI panel is attached to the left controller; point at it with the right controller and press trigger. The left-controller UI is smaller, button/text colours are fixed, and clipping stays off until you set a ceiling cut.
       </div>
     </div>
   </div>
@@ -994,6 +994,7 @@
     function getLeftUIStateKey() {
       return [
         clippingEnabledInput.checked ? "cut1" : "cut0",
+        xrCeilingManual ? "ceiling1" : "ceiling0",
         clipSetModeInput.value,
         modelVerticalOffset.toFixed(2),
         renderer.xr.isPresenting ? "xr1" : "xr0"
@@ -1005,7 +1006,7 @@
       if (!force && key === leftUILastStateKey) return;
       leftUILastStateKey = key;
 
-      updateButtonLabel(leftUICutButton, clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF", 0x1f4862, "rgba(124,199,255,0.95)");
+      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x1f4862, "rgba(124,199,255,0.95)");
       updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x344052, "rgba(124,199,255,0.95)");
       updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x23583c, "rgba(150,240,177,0.95)");
       updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0x69333a, "rgba(255,139,139,0.95)");
@@ -1574,7 +1575,7 @@
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
-        `XR clipping: ${clippingEnabledInput.checked ? "on" : "off"} | Floor ${xrFloorY.toFixed(2)} m | Ceiling ${xrCeilingY.toFixed(2)} m\n` +
+        `XR clipping: ${clippingEnabledInput.checked && isClippingReady() ? "on" : "off"} ${isClippingReady() ? "" : "(waiting for ceiling)"} | Floor ${xrFloorY.toFixed(2)} m | Ceiling ${xrCeilingY.toFixed(2)} m\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -1747,6 +1748,10 @@
       }
     }
 
+    function isClippingReady() {
+      return xrCeilingManual;
+    }
+
     function updateClippingPlanes() {
       floorClipPlane.normal.set(0, 1, 0);
       floorClipPlane.constant = -xrFloorY;
@@ -1754,7 +1759,7 @@
       ceilingClipPlane.normal.set(0, -1, 0);
       ceilingClipPlane.constant = xrCeilingY;
 
-      const clippingActive = clippingEnabledInput.checked && renderer.xr.isPresenting;
+      const clippingActive = clippingEnabledInput.checked && isClippingReady() && renderer.xr.isPresenting;
       const planes = clippingActive ? activeClipPlanes : [];
 
       if (currentObject) {
@@ -1773,7 +1778,7 @@
     }
 
     function updateCeilingMarker(visible = true) {
-      ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual && clippingEnabledInput.checked;
+      ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
       ceilingMarker.position.set(xrCeilingMarkerX, xrCeilingY - 0.006, xrCeilingMarkerZ);
     }
 
@@ -1784,7 +1789,7 @@
     }
 
     function updateFloorMarker(visible = true) {
-      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual && clippingEnabledInput.checked;
+      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
       floorMarker.position.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
     }
 
@@ -1968,9 +1973,9 @@
       showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
 
       setStatus(
-        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor clipping set.</span>\n` +
-        `Left controller height is now the floor. The model base is on that level and the OBJ is cut off below it.\n` +
-        `Green marker = floor cut. Red marker = ceiling cut.`
+        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor level set.</span>\n` +
+        `Left controller height is now the floor. Clipping stays off until you set a ceiling cut.\n` +
+        `Green marker = floor level. Red marker = ceiling cut.`
       );
     }
 
@@ -2006,6 +2011,7 @@
       xrCeilingMarkerX = controllerPos.x;
       xrCeilingMarkerZ = controllerPos.z;
       xrCeilingManual = true;
+      clippingEnabledInput.checked = true;
 
       updateClippingPlanes();
       updateCeilingMarker(true);
@@ -2021,6 +2027,7 @@
     function nudgeXRCeiling(delta) {
       xrCeilingY += delta;
       xrCeilingManual = true;
+      clippingEnabledInput.checked = true;
       updateClippingPlanes();
       updateCeilingMarker(true);
       showARConfirmation(isPassthroughAR ? "AR CEILING ADJUSTED" : "VR CEILING ADJUSTED");
@@ -2145,6 +2152,22 @@
     }
 
     function toggleClippingCuts(showMessage = true) {
+      if (!isClippingReady()) {
+        clippingEnabledInput.checked = false;
+        updateClippingPlanes();
+        updateFloorMarker(true);
+        updateCeilingMarker(true);
+
+        if (showMessage) {
+          showARConfirmation("SET CEILING FIRST");
+          setStatus(
+            `<span class="err">Clipping is off because no ceiling cut has been set yet.</span>\n` +
+            `Hold the left controller at the ceiling/cut height and press the right trigger.`
+          );
+        }
+        return;
+      }
+
       clippingEnabledInput.checked = !clippingEnabledInput.checked;
       updateClippingPlanes();
       updateFloorMarker(true);
@@ -2305,6 +2328,15 @@
     ceilingUpBtn.addEventListener("click", () => nudgeXRCeiling(0.10));
     ceilingDownBtn.addEventListener("click", () => nudgeXRCeiling(-0.10));
     clippingEnabledInput.addEventListener("change", () => {
+      if (clippingEnabledInput.checked && !isClippingReady()) {
+        clippingEnabledInput.checked = false;
+        showARConfirmation("SET CEILING FIRST");
+        setStatus(
+          `<span class="err">Clipping cannot turn on until a ceiling cut is set.</span>\n` +
+          `Hold the left controller at the ceiling/cut height and press the right trigger.`
+        );
+      }
+
       updateClippingPlanes();
       updateFloorMarker(true);
       updateCeilingMarker(true);
@@ -2339,13 +2371,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them. A control panel sits on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. A control panel sits on your left controller.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them. A control panel sits on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. A control panel sits on your left controller.`
         );
       }
     });
@@ -2361,6 +2393,7 @@
       xrFloorY = 0;
       xrCeilingY = 2.2;
       xrCeilingManual = false;
+      clippingEnabledInput.checked = false;
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
