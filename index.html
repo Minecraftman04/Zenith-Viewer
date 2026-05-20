@@ -1065,12 +1065,13 @@
     }
 
     async function reloadModel(resetCamera = true) {
-      if (!getCurrentObjFile()) {
-        setStatus("Select <b>Zenith 1.obj</b> first.", true);
+      const objFile = getCurrentObjFile();
+
+      if (!objFile) {
+        setStatus("Select one or more <b>OBJ</b> files first.", true);
         return;
       }
 
-      const objFile = selectedObjFile;
       const mtlFile = selectedMaterialFiles.find(f => f.name.toLowerCase().endsWith(".mtl"));
 
       setStatus(
