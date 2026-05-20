@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 17</title>
+  <title>Quest OBJ Viewer version 18</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 17</h1>
+        <h1>Quest OBJ Viewer version 18</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -537,12 +537,6 @@
     const scene = new THREE.Scene();
     const normalBackground = new THREE.Color(0x0b0d12);
     scene.background = normalBackground;
-
-    // Independent world marker layer. Cut markers live here, never under the OBJ/modelRoot.
-    const markerLayer = new THREE.Group();
-    markerLayer.name = "fixed_world_marker_layer";
-    markerLayer.matrixAutoUpdate = true;
-    scene.add(markerLayer);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -723,7 +717,7 @@
     // Visible confirmation marker for XR/AR floor calibration.
     const floorMarker = new THREE.Group();
     floorMarker.visible = false;
-    markerLayer.add(floorMarker);
+    scene.add(floorMarker);
 
     const floorRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -763,7 +757,7 @@
 
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
-    markerLayer.add(ceilingMarker);
+    scene.add(ceilingMarker);
 
     const ceilingRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -864,9 +858,11 @@
     // the floor or ceiling. Moving/raising/rolling the OBJ must not move them.
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
-    const fixedMarkerQuat = new THREE.Quaternion();
-    const fixedMarkerScale = new THREE.Vector3(1, 1, 1);
-    const fixedMarkerMatrix = new THREE.Matrix4();
+
+    // Cut heights are separate from the OBJ transform. Moving the OBJ up/down changes
+    // modelVerticalOffset only. It must not change these saved cuts or their markers.
+    let savedFloorCutY = 0;
+    let savedCeilingCutY = 2.2;
 
     let arConfirmTimer = 0;
 
@@ -1096,7 +1092,8 @@
       camera.updateProjectionMatrix();
 
       // Keep cut markers at their fixed world anchors after every OBJ movement/rotation.
-      forceFixedMarkers();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
 
       updateRotationReadout();
     }
@@ -1118,7 +1115,7 @@
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
-        `XR clipping: ${clippingEnabledInput.checked && isClippingReady() ? "on" : "off"} ${isClippingReady() ? "" : "(waiting for ceiling)"} | Floor ${xrFloorY.toFixed(2)} m | Ceiling ${xrCeilingY.toFixed(2)} m\n` +
+        `XR clipping: ${clippingEnabledInput.checked && isClippingReady() ? "on" : "off"} ${isClippingReady() ? "" : "(waiting for ceiling)"} | Floor ${savedFloorCutY.toFixed(2)} m | Ceiling ${savedCeilingCutY.toFixed(2)} m\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -1296,11 +1293,13 @@
     }
 
     function updateClippingPlanes() {
+      // These planes are fixed world cuts. They deliberately use savedFloorCutY /
+      // savedCeilingCutY, not model position or modelVerticalOffset.
       floorClipPlane.normal.set(0, 1, 0);
-      floorClipPlane.constant = -xrFloorY;
+      floorClipPlane.constant = -savedFloorCutY;
 
       ceilingClipPlane.normal.set(0, -1, 0);
-      ceilingClipPlane.constant = xrCeilingY;
+      ceilingClipPlane.constant = savedCeilingCutY;
 
       const clippingActive = clippingEnabledInput.checked && isClippingReady() && renderer.xr.isPresenting;
       const planes = clippingActive ? activeClipPlanes : [];
@@ -1322,19 +1321,8 @@
 
     function updateCeilingMarker(visible = true) {
       ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
-
-      // Hard-set marker transform from the saved world anchor.
-      // This does not use the OBJ/model transform at all.
-      fixedMarkerMatrix.compose(ceilingMarkerWorldPosition, fixedMarkerQuat, fixedMarkerScale);
-      ceilingMarker.matrix.copy(fixedMarkerMatrix);
-      ceilingMarker.matrixWorld.copy(fixedMarkerMatrix);
-      ceilingMarker.matrixAutoUpdate = false;
-      ceilingMarker.matrixWorldNeedsUpdate = false;
-    }
-
-    function forceFixedMarkers() {
-      // Called after OBJ transforms and every XR frame so markers cannot drift with the OBJ.
-      forceFixedMarkers();
+      ceilingMarker.position.copy(ceilingMarkerWorldPosition);
+      ceilingMarker.updateMatrixWorld(true);
     }
 
     function showARConfirmation(message = "AR FLOOR SET") {
@@ -1345,14 +1333,8 @@
 
     function updateFloorMarker(visible = true) {
       floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
-
-      // Hard-set marker transform from the saved world anchor.
-      // This does not use the OBJ/model transform at all.
-      fixedMarkerMatrix.compose(floorMarkerWorldPosition, fixedMarkerQuat, fixedMarkerScale);
-      floorMarker.matrix.copy(fixedMarkerMatrix);
-      floorMarker.matrixWorld.copy(fixedMarkerMatrix);
-      floorMarker.matrixAutoUpdate = false;
-      floorMarker.matrixWorldNeedsUpdate = false;
+      floorMarker.position.copy(floorMarkerWorldPosition);
+      floorMarker.updateMatrixWorld(true);
     }
 
     function applyXRFloorPlacement() {
@@ -1363,7 +1345,8 @@
       }
 
       updateClippingPlanes();
-      forceFixedMarkers();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
     }
 
     function autoDetectXRFloor() {
@@ -1377,11 +1360,13 @@
       // If the Quest gives a real local-floor space, camera Y is usually around standing eye height.
       // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
       xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
-      floorMarkerWorldPosition.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
+      savedFloorCutY = xrFloorY;
+      floorMarkerWorldPosition.set(xrFloorMarkerX, savedFloorCutY + 0.006, xrFloorMarkerZ);
 
       if (!xrCeilingManual) {
         xrCeilingY = xrFloorY + 2.2;
-        ceilingMarkerWorldPosition.set(xrCeilingMarkerX, xrCeilingY - 0.006, xrCeilingMarkerZ);
+        savedCeilingCutY = xrCeilingY;
+        ceilingMarkerWorldPosition.set(xrCeilingMarkerX, savedCeilingCutY - 0.006, xrCeilingMarkerZ);
       }
 
       xrFloorAutoSet = true;
@@ -1524,9 +1509,10 @@
       }
 
       xrFloorY = controllerPos.y;
+      savedFloorCutY = controllerPos.y;
       xrFloorMarkerX = controllerPos.x;
       xrFloorMarkerZ = controllerPos.z;
-      floorMarkerWorldPosition.set(controllerPos.x, xrFloorY + 0.006, controllerPos.z);
+      floorMarkerWorldPosition.set(controllerPos.x, savedFloorCutY + 0.006, controllerPos.z);
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -1568,9 +1554,10 @@
       }
 
       xrCeilingY = controllerPos.y;
+      savedCeilingCutY = controllerPos.y;
       xrCeilingMarkerX = controllerPos.x;
       xrCeilingMarkerZ = controllerPos.z;
-      ceilingMarkerWorldPosition.set(controllerPos.x, xrCeilingY - 0.006, controllerPos.z);
+      ceilingMarkerWorldPosition.set(controllerPos.x, savedCeilingCutY - 0.006, controllerPos.z);
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
 
@@ -1586,8 +1573,9 @@
     }
 
     function nudgeXRCeiling(delta) {
-      xrCeilingY += delta;
-      ceilingMarkerWorldPosition.y = xrCeilingY - 0.006;
+      savedCeilingCutY += delta;
+      xrCeilingY = savedCeilingCutY;
+      ceilingMarkerWorldPosition.y = savedCeilingCutY - 0.006;
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
       updateClippingPlanes();
@@ -1600,8 +1588,9 @@
     }
 
     function nudgeXRFloor(delta) {
-      xrFloorY += delta;
-      floorMarkerWorldPosition.y = xrFloorY + 0.006;
+      savedFloorCutY += delta;
+      xrFloorY = savedFloorCutY;
+      floorMarkerWorldPosition.y = savedFloorCutY + 0.006;
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -1733,7 +1722,8 @@
 
       clippingEnabledInput.checked = !clippingEnabledInput.checked;
       updateClippingPlanes();
-      forceFixedMarkers();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
 
       if (showMessage) {
         showARConfirmation(clippingEnabledInput.checked ? "CUTTING ON" : "CUTTING OFF");
@@ -1897,7 +1887,8 @@
       }
 
       updateClippingPlanes();
-      forceFixedMarkers();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
     });
 
     renderer.xr.addEventListener("sessionstart", () => {
@@ -1926,13 +1917,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are in an independent fixed marker layer and are forced back to saved world positions every frame. Moving the OBJ should not move them.`
+          `Green/red markers use saved cut heights and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are in an independent fixed marker layer and are forced back to saved world positions every frame. Moving the OBJ should not move them.`
+          `Green/red markers use saved cut heights and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
         );
       }
     });
@@ -1949,8 +1940,10 @@
       xrCeilingY = 2.2;
       xrCeilingManual = false;
       clippingEnabledInput.checked = false;
-      floorMarkerWorldPosition.set(0, 0.006, 0);
-      ceilingMarkerWorldPosition.set(0, 2.194, 0);
+      savedFloorCutY = 0;
+      savedCeilingCutY = 2.2;
+      floorMarkerWorldPosition.set(0, savedFloorCutY + 0.006, 0);
+      ceilingMarkerWorldPosition.set(0, savedCeilingCutY - 0.006, 0);
       xrFloorMarkerX = 0;
       xrFloorMarkerZ = 0;
       xrCeilingMarkerX = 0;
@@ -1985,10 +1978,6 @@
       }
 
       handleXRMovement(dt);
-
-      if (renderer.xr.isPresenting) {
-        forceFixedMarkers();
-      }
 
       if (!renderer.xr.isPresenting) {
         controls.update();
