@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 16</title>
+  <title>Quest OBJ Viewer version 17</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 16</h1>
+        <h1>Quest OBJ Viewer version 17</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -538,6 +538,12 @@
     const normalBackground = new THREE.Color(0x0b0d12);
     scene.background = normalBackground;
 
+    // Independent world marker layer. Cut markers live here, never under the OBJ/modelRoot.
+    const markerLayer = new THREE.Group();
+    markerLayer.name = "fixed_world_marker_layer";
+    markerLayer.matrixAutoUpdate = true;
+    scene.add(markerLayer);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -717,7 +723,7 @@
     // Visible confirmation marker for XR/AR floor calibration.
     const floorMarker = new THREE.Group();
     floorMarker.visible = false;
-    scene.add(floorMarker);
+    markerLayer.add(floorMarker);
 
     const floorRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -757,7 +763,7 @@
 
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
-    scene.add(ceilingMarker);
+    markerLayer.add(ceilingMarker);
 
     const ceilingRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -858,6 +864,9 @@
     // the floor or ceiling. Moving/raising/rolling the OBJ must not move them.
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
+    const fixedMarkerQuat = new THREE.Quaternion();
+    const fixedMarkerScale = new THREE.Vector3(1, 1, 1);
+    const fixedMarkerMatrix = new THREE.Matrix4();
 
     let arConfirmTimer = 0;
 
@@ -1087,8 +1096,7 @@
       camera.updateProjectionMatrix();
 
       // Keep cut markers at their fixed world anchors after every OBJ movement/rotation.
-      updateFloorMarker(true);
-      updateCeilingMarker(true);
+      forceFixedMarkers();
 
       updateRotationReadout();
     }
@@ -1314,8 +1322,19 @@
 
     function updateCeilingMarker(visible = true) {
       ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
-      ceilingMarker.position.copy(ceilingMarkerWorldPosition);
-      ceilingMarker.updateMatrixWorld(true);
+
+      // Hard-set marker transform from the saved world anchor.
+      // This does not use the OBJ/model transform at all.
+      fixedMarkerMatrix.compose(ceilingMarkerWorldPosition, fixedMarkerQuat, fixedMarkerScale);
+      ceilingMarker.matrix.copy(fixedMarkerMatrix);
+      ceilingMarker.matrixWorld.copy(fixedMarkerMatrix);
+      ceilingMarker.matrixAutoUpdate = false;
+      ceilingMarker.matrixWorldNeedsUpdate = false;
+    }
+
+    function forceFixedMarkers() {
+      // Called after OBJ transforms and every XR frame so markers cannot drift with the OBJ.
+      forceFixedMarkers();
     }
 
     function showARConfirmation(message = "AR FLOOR SET") {
@@ -1326,8 +1345,14 @@
 
     function updateFloorMarker(visible = true) {
       floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
-      floorMarker.position.copy(floorMarkerWorldPosition);
-      floorMarker.updateMatrixWorld(true);
+
+      // Hard-set marker transform from the saved world anchor.
+      // This does not use the OBJ/model transform at all.
+      fixedMarkerMatrix.compose(floorMarkerWorldPosition, fixedMarkerQuat, fixedMarkerScale);
+      floorMarker.matrix.copy(fixedMarkerMatrix);
+      floorMarker.matrixWorld.copy(fixedMarkerMatrix);
+      floorMarker.matrixAutoUpdate = false;
+      floorMarker.matrixWorldNeedsUpdate = false;
     }
 
     function applyXRFloorPlacement() {
@@ -1338,8 +1363,7 @@
       }
 
       updateClippingPlanes();
-      updateFloorMarker(true);
-      updateCeilingMarker(true);
+      forceFixedMarkers();
     }
 
     function autoDetectXRFloor() {
@@ -1709,8 +1733,7 @@
 
       clippingEnabledInput.checked = !clippingEnabledInput.checked;
       updateClippingPlanes();
-      updateFloorMarker(true);
-      updateCeilingMarker(true);
+      forceFixedMarkers();
 
       if (showMessage) {
         showARConfirmation(clippingEnabledInput.checked ? "CUTTING ON" : "CUTTING OFF");
@@ -1874,8 +1897,7 @@
       }
 
       updateClippingPlanes();
-      updateFloorMarker(true);
-      updateCeilingMarker(true);
+      forceFixedMarkers();
     });
 
     renderer.xr.addEventListener("sessionstart", () => {
@@ -1904,13 +1926,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = fixed floor cut. Red marker = fixed ceiling cut. Moving the OBJ should not move the markers.`
+          `Green/red markers are in an independent fixed marker layer and are forced back to saved world positions every frame. Moving the OBJ should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = fixed floor cut. Red marker = fixed ceiling cut. Moving the OBJ should not move the markers.`
+          `Green/red markers are in an independent fixed marker layer and are forced back to saved world positions every frame. Moving the OBJ should not move them.`
         );
       }
     });
@@ -1963,6 +1985,10 @@
       }
 
       handleXRMovement(dt);
+
+      if (renderer.xr.isPresenting) {
+        forceFixedMarkers();
+      }
 
       if (!renderer.xr.isPresenting) {
         controls.update();
