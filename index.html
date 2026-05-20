@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 18</title>
+  <title>Quest OBJ Viewer version 19</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 18</h1>
+        <h1>Quest OBJ Viewer version 19</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -585,6 +585,13 @@
     // even if the virtual view/cameraRig is moved.
     cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2);
 
+    // Floor/ceiling marker anchors live in XR tracking space, not in the OBJ/model space.
+    // That means right-stick model movement/rotation and left-stick virtual locomotion do
+    // not drag the green/red markers around after they have been set.
+    const markerAnchorRoot = new THREE.Group();
+    markerAnchorRoot.name = "xr_marker_anchor_root";
+    cameraRig.add(markerAnchorRoot);
+
     const controllerModelFactory = new XRControllerModelFactory();
 
     const controllerModel1 = controllerModelFactory.createControllerModel(controllerGrip1);
@@ -717,7 +724,7 @@
     // Visible confirmation marker for XR/AR floor calibration.
     const floorMarker = new THREE.Group();
     floorMarker.visible = false;
-    scene.add(floorMarker);
+    markerAnchorRoot.add(floorMarker);
 
     const floorRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -757,7 +764,7 @@
 
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
-    scene.add(ceilingMarker);
+    markerAnchorRoot.add(ceilingMarker);
 
     const ceilingRing = new THREE.Mesh(
       new THREE.RingGeometry(0.10, 0.16, 64),
@@ -854,15 +861,29 @@
     let xrCeilingMarkerX = 0;
     let xrCeilingMarkerZ = 0;
 
-    // Fixed world-space marker anchors. These are changed only when you set/nudge
-    // the floor or ceiling. Moving/raising/rolling the OBJ must not move them.
+    // Fixed XR-tracking-space marker anchors. These are changed only when you set/nudge
+    // the floor or ceiling. Moving/raising/rolling the OBJ must not move them, and
+    // left-stick virtual locomotion should not make them slide around the real room.
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
+    const markerWorldScratch = new THREE.Vector3();
 
     // Cut heights are separate from the OBJ transform. Moving the OBJ up/down changes
     // modelVerticalOffset only. It must not change these saved cuts or their markers.
     let savedFloorCutY = 0;
     let savedCeilingCutY = 2.2;
+
+    function setFloorMarkerAnchorFromWorld(x, y, z) {
+      markerAnchorRoot.updateMatrixWorld(true);
+      markerWorldScratch.set(x, y + 0.006, z);
+      floorMarkerWorldPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
+    }
+
+    function setCeilingMarkerAnchorFromWorld(x, y, z) {
+      markerAnchorRoot.updateMatrixWorld(true);
+      markerWorldScratch.set(x, y - 0.006, z);
+      ceilingMarkerWorldPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
+    }
 
     let arConfirmTimer = 0;
 
@@ -1361,12 +1382,12 @@
       // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
       xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
       savedFloorCutY = xrFloorY;
-      floorMarkerWorldPosition.set(xrFloorMarkerX, savedFloorCutY + 0.006, xrFloorMarkerZ);
+      setFloorMarkerAnchorFromWorld(xrFloorMarkerX, savedFloorCutY, xrFloorMarkerZ);
 
       if (!xrCeilingManual) {
         xrCeilingY = xrFloorY + 2.2;
         savedCeilingCutY = xrCeilingY;
-        ceilingMarkerWorldPosition.set(xrCeilingMarkerX, savedCeilingCutY - 0.006, xrCeilingMarkerZ);
+        setCeilingMarkerAnchorFromWorld(xrCeilingMarkerX, savedCeilingCutY, xrCeilingMarkerZ);
       }
 
       xrFloorAutoSet = true;
@@ -1512,7 +1533,7 @@
       savedFloorCutY = controllerPos.y;
       xrFloorMarkerX = controllerPos.x;
       xrFloorMarkerZ = controllerPos.z;
-      floorMarkerWorldPosition.set(controllerPos.x, savedFloorCutY + 0.006, controllerPos.z);
+      setFloorMarkerAnchorFromWorld(controllerPos.x, savedFloorCutY, controllerPos.z);
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -1557,7 +1578,7 @@
       savedCeilingCutY = controllerPos.y;
       xrCeilingMarkerX = controllerPos.x;
       xrCeilingMarkerZ = controllerPos.z;
-      ceilingMarkerWorldPosition.set(controllerPos.x, savedCeilingCutY - 0.006, controllerPos.z);
+      setCeilingMarkerAnchorFromWorld(controllerPos.x, savedCeilingCutY, controllerPos.z);
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
 
@@ -1575,7 +1596,7 @@
     function nudgeXRCeiling(delta) {
       savedCeilingCutY += delta;
       xrCeilingY = savedCeilingCutY;
-      ceilingMarkerWorldPosition.y = savedCeilingCutY - 0.006;
+      ceilingMarkerWorldPosition.y += delta;
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
       updateClippingPlanes();
@@ -1590,7 +1611,7 @@
     function nudgeXRFloor(delta) {
       savedFloorCutY += delta;
       xrFloorY = savedFloorCutY;
-      floorMarkerWorldPosition.y = savedFloorCutY + 0.006;
+      floorMarkerWorldPosition.y += delta;
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -1917,13 +1938,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers use saved cut heights and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers use saved cut heights and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
         );
       }
     });
