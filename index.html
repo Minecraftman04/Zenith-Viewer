@@ -245,70 +245,6 @@
       display: block;
     }
 
-    #xrHoverConfirm {
-      position: fixed;
-      left: 50%;
-      top: calc(max(18px, env(safe-area-inset-top)) + 48px);
-      transform: translateX(-50%);
-      z-index: 30;
-      display: none;
-      padding: 8px 12px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,210,124,0.75);
-      background: rgba(72, 48, 12, 0.82);
-      color: #fff1cf;
-      font-weight: 800;
-      font-size: 13px;
-      box-shadow: 0 12px 44px rgba(0,0,0,0.45);
-      backdrop-filter: blur(12px);
-      pointer-events: none;
-    }
-
-    #xrHoverConfirm.show {
-      display: block;
-    }
-
-    #xrModelControls {
-      position: fixed;
-      left: 50%;
-      bottom: calc(max(12px, env(safe-area-inset-bottom)) + 122px);
-      transform: translateX(-50%);
-      z-index: 31;
-      display: none;
-      align-items: center;
-      gap: 8px;
-      padding: 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(18, 22, 32, 0.82);
-      box-shadow: 0 12px 44px rgba(0,0,0,0.45);
-      backdrop-filter: blur(12px);
-    }
-
-    #xrModelControls.show {
-      display: flex;
-    }
-
-    #xrModelControls button,
-    #xrModelControls label {
-      min-height: 36px;
-      padding: 8px 10px;
-      border-radius: 999px;
-      white-space: nowrap;
-      font-size: 13px;
-    }
-
-    #xrModelName {
-      max-width: min(40vw, 260px);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 800;
-      padding: 0 4px;
-    }
-
     .hint {
       color: var(--muted);
       font-size: 12px;
@@ -367,15 +303,6 @@
 
 <body>
   <div id="arConfirm">AR FLOOR SET</div>
-  <div id="xrHoverConfirm">AIMING AT BUTTON</div>
-
-  <div id="xrModelControls">
-    <button id="xrPrevModelBtn" type="button">◀ Prev</button>
-    <span id="xrModelName">No model</span>
-    <button id="xrNextModelBtn" type="button">Next ▶</button>
-    <label class="filebutton" for="objInput">Change OBJ</label>
-  </div>
-
   <div id="ui">
     <div class="topbar">
       <div>
@@ -387,8 +314,8 @@
 
     <div class="body">
       <div class="row">
-        <label class="filebutton primary" for="objInput">Choose OBJ(s)</label>
-        <input id="objInput" type="file" multiple accept=".obj" />
+        <label class="filebutton primary" for="objInput">Choose OBJ</label>
+        <input id="objInput" type="file" accept=".obj" />
 
         <label class="filebutton" for="materialInput">Add MTL / Textures</label>
         <input id="materialInput" type="file" multiple accept=".mtl,.png,.jpg,.jpeg,.webp,.bmp,.gif,.tga,.exr" />
@@ -477,7 +404,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows Quest controller models where supported, plus pointer rays and grip markers as a fallback.</span>
+          <span>Shows controller models/rays attached to the same XR rig as the headset, so they stay aligned with your real controllers.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -522,11 +449,11 @@
         </div>
       </div>
 
-      <div id="status">Select one or more OBJ files first, then use <b>Add MTL / Textures</b> if needed. In VR/AR, use the floating Prev/Next controls to change model.</div>
+      <div id="status">Select <b>Zenith 1.obj</b> first, then use <b>Add MTL / Textures</b> to apply the material file separately.</div>
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue/left and green/right controller visuals are shown; blue pad = previous model, green pad = next model. A pad turns amber and an AIMING message appears when your ray is on it. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. Controller visuals are attached to the headset XR rig, not the OBJ.
       </div>
     </div>
   </div>
@@ -562,11 +489,6 @@
     const rotationReadout = document.getElementById("rotationReadout");
     const ui = document.getElementById("ui");
     const arConfirm = document.getElementById("arConfirm");
-    const xrHoverConfirm = document.getElementById("xrHoverConfirm");
-    const xrModelControls = document.getElementById("xrModelControls");
-    const xrPrevModelBtn = document.getElementById("xrPrevModelBtn");
-    const xrNextModelBtn = document.getElementById("xrNextModelBtn");
-    const xrModelName = document.getElementById("xrModelName");
 
     const scene = new THREE.Scene();
     const normalBackground = new THREE.Color(0x0b0d12);
@@ -612,7 +534,11 @@
     const controller2 = renderer.xr.getController(1);
     const controllerGrip1 = renderer.xr.getControllerGrip(0);
     const controllerGrip2 = renderer.xr.getControllerGrip(1);
-    scene.add(controller1, controller2, controllerGrip1, controllerGrip2);
+
+    // Important: controllers are children of the same rig as the XR camera.
+    // This keeps the visible controller positions aligned with the real controllers
+    // even if the virtual view/cameraRig is moved.
+    cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2);
 
     const controllerModelFactory = new XRControllerModelFactory();
 
@@ -668,8 +594,8 @@
       return group;
     }
 
-    const controllerRay1 = makeControllerRay(0x7cc7ff); // left/first controller blue
-    const controllerRay2 = makeControllerRay(0x96f0b1); // right/second controller green
+    const controllerRay1 = makeControllerRay(0x7cc7ff);
+    const controllerRay2 = makeControllerRay(0x96f0b1);
     controller1.add(controllerRay1);
     controller2.add(controllerRay2);
 
@@ -701,7 +627,6 @@
       grip.userData.index = index;
       grip.userData.handedness = handedness;
 
-      // Re-colour fallback visuals based on handedness if the browser provides it.
       const color = handedness === "left" ? 0x7cc7ff : handedness === "right" ? 0x96f0b1 : 0xffd27c;
 
       marker.traverse((child) => {
@@ -788,48 +713,8 @@
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
 
-    // In-world XR model switch panel. It follows your view and gives a fallback if DOM overlay
-    // is hard to interact with in immersive mode.
-    const xrPanel = new THREE.Group();
-    xrPanel.visible = false;
-    camera.add(xrPanel);
-
-    const xrPanelBg = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.78, 0.18),
-      new THREE.MeshBasicMaterial({ color: 0x111722, transparent: true, opacity: 0.72, side: THREE.DoubleSide })
-    );
-    xrPanelBg.position.set(0, -0.34, -1.05);
-    xrPanel.add(xrPanelBg);
-
-    const xrPrevPad = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.10, 0.01),
-      new THREE.MeshBasicMaterial({ color: 0x7cc7ff, transparent: true, opacity: 0.72 })
-    );
-    xrPrevPad.name = "XR_PREV_MODEL";
-    xrPrevPad.userData.baseColor = 0x7cc7ff;
-    xrPrevPad.userData.hoverColor = 0xffd27c;
-    xrPrevPad.position.set(-0.26, -0.34, -1.04);
-    xrPanel.add(xrPrevPad);
-
-    const xrNextPad = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.10, 0.01),
-      new THREE.MeshBasicMaterial({ color: 0x96f0b1, transparent: true, opacity: 0.72 })
-    );
-    xrNextPad.name = "XR_NEXT_MODEL";
-    xrNextPad.userData.baseColor = 0x96f0b1;
-    xrNextPad.userData.hoverColor = 0xffd27c;
-    xrNextPad.position.set(0.26, -0.34, -1.04);
-    xrPanel.add(xrNextPad);
-
-    const xrPanelRaycaster = new THREE.Raycaster();
-    const xrControllerRayOrigin = new THREE.Vector3();
-    const xrControllerRayDirection = new THREE.Vector3();
-    const xrControllerMatrix = new THREE.Matrix4();
-    let xrHoveredPanelButton = null;
-
     let currentObject = null;
-    let selectedObjFiles = [];
-    let currentModelIndex = 0;
+    let selectedObjFile = null;
     let selectedMaterialFiles = [];
     let objectURLs = [];
 
@@ -1091,32 +976,13 @@
       const mtlName = getMtlName();
 
       setStatus(
-        `<span class="ok">Loaded:</span> ${escapeHTML(getCurrentObjFile()?.name || "OBJ model")} ${selectedObjFiles.length > 1 ? "(" + (currentModelIndex + 1) + "/" + selectedObjFiles.length + ")" : ""}\n` +
+        `<span class="ok">Loaded:</span> ${escapeHTML(selectedObjFile?.name || "OBJ model")}\n` +
         `Material: ${mtlName ? escapeHTML(mtlName) : "none selected"}\n` +
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
-    }
-
-    function getCurrentObjFile() {
-      if (!selectedObjFiles.length) return null;
-      return selectedObjFiles[currentModelIndex] || selectedObjFiles[0] || null;
-    }
-
-    function updateModelButtons() {
-      const current = getCurrentObjFile();
-      const count = selectedObjFiles.length;
-
-      xrModelName.textContent = current ? `${current.name}${count > 1 ? ` (${currentModelIndex + 1}/${count})` : ""}` : "No model";
-      xrPrevModelBtn.disabled = count <= 1;
-      xrNextModelBtn.disabled = count <= 1;
-    }
-
-    function showXRModelControls(show) {
-      xrModelControls.classList.toggle("show", !!show);
-      updateModelButtons();
     }
 
     function getMtlName() {
@@ -1135,43 +1001,15 @@
 
     async function loadObjFile(files) {
       const fileArray = [...(files || [])];
-      const objFiles = fileArray.filter(f => f.name.toLowerCase().endsWith(".obj"));
+      const objFile = fileArray.find(f => f.name.toLowerCase().endsWith(".obj"));
 
-      if (!objFiles.length) {
-        setStatus("No .obj file selected. Select one or more OBJ files.", true);
+      if (!objFile) {
+        setStatus("No .obj file selected. Select <b>Zenith 1.obj</b>.", true);
         return;
       }
 
-      selectedObjFiles = objFiles;
-      currentModelIndex = 0;
-      updateModelButtons();
+      selectedObjFile = objFile;
       await reloadModel(true);
-    }
-
-    async function switchModel(direction) {
-      if (!selectedObjFiles.length) {
-        setStatus("No OBJ models are loaded yet. Choose one or more OBJ files first.", true);
-        return;
-      }
-
-      if (selectedObjFiles.length <= 1) {
-        setStatus("Only one OBJ model is loaded. Choose multiple OBJ files to switch between them.");
-        return;
-      }
-
-      currentModelIndex += direction;
-
-      if (currentModelIndex < 0) {
-        currentModelIndex = selectedObjFiles.length - 1;
-      }
-
-      if (currentModelIndex >= selectedObjFiles.length) {
-        currentModelIndex = 0;
-      }
-
-      updateModelButtons();
-      await reloadModel(false);
-      showARConfirmation(`MODEL ${currentModelIndex + 1}/${selectedObjFiles.length}`);
     }
 
     async function loadMaterialFiles(files) {
@@ -1188,11 +1026,11 @@
       }
       selectedMaterialFiles = [...merged.values()];
 
-      if (!getCurrentObjFile()) {
+      if (!selectedObjFile) {
         const mtlName = getMtlName();
         setStatus(
           `Material files selected${mtlName ? ": <b>" + escapeHTML(mtlName) + "</b>" : ""}.\n` +
-          `Now choose one or more <b>OBJ</b> files to load the model.`
+          `Now choose <b>Zenith 1.obj</b> to load the model.`
         );
         return;
       }
@@ -1201,13 +1039,12 @@
     }
 
     async function reloadModel(resetCamera = true) {
-      const objFile = getCurrentObjFile();
-
-      if (!objFile) {
-        setStatus("Select one or more <b>OBJ</b> files first.", true);
+      if (!selectedObjFile) {
+        setStatus("Select <b>Zenith 1.obj</b> first.", true);
         return;
       }
 
+      const objFile = selectedObjFile;
       const mtlFile = selectedMaterialFiles.find(f => f.name.toLowerCase().endsWith(".mtl"));
 
       setStatus(
@@ -1386,91 +1223,8 @@
       return null;
     }
 
-    function getXRPanelHitForController(controller) {
-      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) return null;
-      if (!controller) return null;
-
-      controller.updateMatrixWorld(true);
-      xrControllerRayOrigin.setFromMatrixPosition(controller.matrixWorld);
-      xrControllerMatrix.extractRotation(controller.matrixWorld);
-      xrControllerRayDirection.set(0, 0, -1).applyMatrix4(xrControllerMatrix).normalize();
-
-      xrPanelRaycaster.set(xrControllerRayOrigin, xrControllerRayDirection);
-      const hits = xrPanelRaycaster.intersectObjects([xrPrevPad, xrNextPad], false);
-
-      return hits.length ? hits[0] : null;
-    }
-
-    function clearXRPanelHover() {
-      xrHoveredPanelButton = null;
-
-      for (const pad of [xrPrevPad, xrNextPad]) {
-        pad.material.color.setHex(pad.userData.baseColor);
-        pad.material.opacity = 0.72;
-        pad.scale.set(1, 1, 1);
-      }
-
-      xrHoverConfirm.classList.remove("show");
-    }
-
-    function updateXRPanelHover() {
-      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) {
-        clearXRPanelHover();
-        return;
-      }
-
-      const hit1 = getXRPanelHitForController(controller1);
-      const hit2 = getXRPanelHitForController(controller2);
-      const hit = hit2 || hit1; // Prefer the right controller if both are pointing.
-
-      if (!hit) {
-        clearXRPanelHover();
-        return;
-      }
-
-      const target = hit.object;
-      xrHoveredPanelButton = target;
-
-      for (const pad of [xrPrevPad, xrNextPad]) {
-        if (pad === target) {
-          pad.material.color.setHex(pad.userData.hoverColor);
-          pad.material.opacity = 1.0;
-          pad.scale.set(1.28, 1.28, 1.28);
-        } else {
-          pad.material.color.setHex(pad.userData.baseColor);
-          pad.material.opacity = 0.46;
-          pad.scale.set(1, 1, 1);
-        }
-      }
-
-      xrHoverConfirm.textContent = target.name === "XR_PREV_MODEL" ? "AIMING AT PREV — PULL TRIGGER" : "AIMING AT NEXT — PULL TRIGGER";
-      xrHoverConfirm.classList.add("show");
-    }
-
-    async function handleXRPanelSelection(triggeringController) {
-      const hit = getXRPanelHitForController(triggeringController);
-      if (!hit) return false;
-
-      const target = hit.object;
-      if (target.name === "XR_PREV_MODEL") {
-        await switchModel(-1);
-        return true;
-      }
-
-      if (target.name === "XR_NEXT_MODEL") {
-        await switchModel(1);
-        return true;
-      }
-
-      return false;
-    }
-
-    async function handleControllerTrigger(triggeringController) {
+    function handleControllerTrigger(triggeringController) {
       if (!renderer.xr.isPresenting) return;
-
-      if (await handleXRPanelSelection(triggeringController)) {
-        return;
-      }
 
       const hand = triggeringController.userData.handedness || "unknown";
 
@@ -1657,9 +1411,6 @@
       loadObjFile(event.target.files);
     });
 
-    xrPrevModelBtn.addEventListener("click", () => switchModel(-1));
-    xrNextModelBtn.addEventListener("click", () => switchModel(1));
-
     materialInput.addEventListener("change", (event) => {
       loadMaterialFiles(event.target.files);
     });
@@ -1724,8 +1475,6 @@
       // Avoid carrying the normal desktop/orbit camera offset into XR.
       camera.position.set(0, 0, 0);
       cameraRig.position.set(0, 0, 0);
-      showXRModelControls(true);
-      xrPanel.visible = true;
       updateControllerVisuals();
 
       if (isPassthroughAR) {
@@ -1741,14 +1490,12 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To calibrate the real floor: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `A green marker and AR FLOOR SET message will confirm it worked.\n` +
-          `Use the floating Prev/Next controls or point at the in-world pads to change model.`
+          `A green marker and AR FLOOR SET message will confirm it worked.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `Use the floating Prev/Next controls or point at the in-world pads to change model.`
+          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.`
         );
       }
     });
@@ -1765,10 +1512,7 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       floorMarker.visible = false;
-      showXRModelControls(false);
-      xrPanel.visible = false;
       updateControllerVisuals();
-      clearXRPanelHover();
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
       reframeCurrentModel(true);
@@ -1781,7 +1525,6 @@
       if (renderer.xr.isPresenting) {
         autoDetectXRFloor();
         updateControllerVisuals();
-        updateXRPanelHover();
       }
 
       if (arConfirmTimer > 0) {
