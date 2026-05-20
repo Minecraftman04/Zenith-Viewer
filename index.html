@@ -245,6 +245,47 @@
       display: block;
     }
 
+    #xrModelControls {
+      position: fixed;
+      left: 50%;
+      bottom: calc(max(12px, env(safe-area-inset-bottom)) + 122px);
+      transform: translateX(-50%);
+      z-index: 31;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(18, 22, 32, 0.82);
+      box-shadow: 0 12px 44px rgba(0,0,0,0.45);
+      backdrop-filter: blur(12px);
+    }
+
+    #xrModelControls.show {
+      display: flex;
+    }
+
+    #xrModelControls button,
+    #xrModelControls label {
+      min-height: 36px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    #xrModelName {
+      max-width: min(40vw, 260px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 800;
+      padding: 0 4px;
+    }
+
     .hint {
       color: var(--muted);
       font-size: 12px;
@@ -303,6 +344,14 @@
 
 <body>
   <div id="arConfirm">AR FLOOR SET</div>
+
+  <div id="xrModelControls">
+    <button id="xrPrevModelBtn" type="button">◀ Prev</button>
+    <span id="xrModelName">No model</span>
+    <button id="xrNextModelBtn" type="button">Next ▶</button>
+    <label class="filebutton" for="objInput">Change OBJ</label>
+  </div>
+
   <div id="ui">
     <div class="topbar">
       <div>
@@ -314,8 +363,8 @@
 
     <div class="body">
       <div class="row">
-        <label class="filebutton primary" for="objInput">Choose OBJ</label>
-        <input id="objInput" type="file" accept=".obj" />
+        <label class="filebutton primary" for="objInput">Choose OBJ(s)</label>
+        <input id="objInput" type="file" multiple accept=".obj" />
 
         <label class="filebutton" for="materialInput">Add MTL / Textures</label>
         <input id="materialInput" type="file" multiple accept=".mtl,.png,.jpg,.jpeg,.webp,.bmp,.gif,.tga,.exr" />
@@ -396,9 +445,22 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rotates the model around the global Z axis, even after UI rotations.</span>
+          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model around its own length axis, like spinning a rocket from engine to nose cone.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Right-stick spin axis</b><br />
+          <span>Use Auto for rockets. It picks the model’s longest local axis. If it spins wrong, try X, Y, or Z.</span>
+        </div>
+        <select id="spinAxisInput">
+          <option value="auto" selected>Auto longest axis</option>
+          <option value="x">Model X axis</option>
+          <option value="y">Model Y axis</option>
+          <option value="z">Model Z axis</option>
+        </select>
       </div>
 
       <div class="control">
@@ -428,11 +490,11 @@
         </div>
       </div>
 
-      <div id="status">Select <b>Zenith 1.obj</b> first, then use <b>Add MTL / Textures</b> to apply the material file separately.</div>
+      <div id="status">Select one or more OBJ files first, then use <b>Add MTL / Textures</b> if needed. In VR/AR, use the floating Prev/Next controls to change model.</div>
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rotates global Z even after UI rotations. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue pad = previous model, green pad = next model. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
       </div>
     </div>
   </div>
@@ -455,6 +517,7 @@
     const heightModeInput = document.getElementById("heightModeInput");
     const gridInput = document.getElementById("gridInput");
     const moveInput = document.getElementById("moveInput");
+    const spinAxisInput = document.getElementById("spinAxisInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
     const arFloorInput = document.getElementById("arFloorInput");
     const floorUpBtn = document.getElementById("floorUpBtn");
@@ -465,6 +528,10 @@
     const rotationReadout = document.getElementById("rotationReadout");
     const ui = document.getElementById("ui");
     const arConfirm = document.getElementById("arConfirm");
+    const xrModelControls = document.getElementById("xrModelControls");
+    const xrPrevModelBtn = document.getElementById("xrPrevModelBtn");
+    const xrNextModelBtn = document.getElementById("xrNextModelBtn");
+    const xrModelName = document.getElementById("xrModelName");
 
     const scene = new THREE.Scene();
     const normalBackground = new THREE.Color(0x0b0d12);
@@ -590,8 +657,43 @@
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
 
+    // In-world XR model switch panel. It follows your view and gives a fallback if DOM overlay
+    // is hard to interact with in immersive mode.
+    const xrPanel = new THREE.Group();
+    xrPanel.visible = false;
+    camera.add(xrPanel);
+
+    const xrPanelBg = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.78, 0.18),
+      new THREE.MeshBasicMaterial({ color: 0x111722, transparent: true, opacity: 0.72, side: THREE.DoubleSide })
+    );
+    xrPanelBg.position.set(0, -0.34, -1.05);
+    xrPanel.add(xrPanelBg);
+
+    const xrPrevPad = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.10, 0.01),
+      new THREE.MeshBasicMaterial({ color: 0x7cc7ff, transparent: true, opacity: 0.72 })
+    );
+    xrPrevPad.name = "XR_PREV_MODEL";
+    xrPrevPad.position.set(-0.26, -0.34, -1.04);
+    xrPanel.add(xrPrevPad);
+
+    const xrNextPad = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.10, 0.01),
+      new THREE.MeshBasicMaterial({ color: 0x96f0b1, transparent: true, opacity: 0.72 })
+    );
+    xrNextPad.name = "XR_NEXT_MODEL";
+    xrNextPad.position.set(0.26, -0.34, -1.04);
+    xrPanel.add(xrNextPad);
+
+    const xrPanelRaycaster = new THREE.Raycaster();
+    const xrControllerRayOrigin = new THREE.Vector3();
+    const xrControllerRayDirection = new THREE.Vector3();
+    const xrControllerMatrix = new THREE.Matrix4();
+
     let currentObject = null;
-    let selectedObjFile = null;
+    let selectedObjFiles = [];
+    let currentModelIndex = 0;
     let selectedMaterialFiles = [];
     let objectURLs = [];
 
@@ -603,8 +705,10 @@
     };
 
     const quarterTurn = Math.PI / 2;
-    let controllerZRotation = 0; // Smooth world/global Z-axis rotation added by the right controller thumbstick.
-    const controllerZQuat = new THREE.Quaternion();
+    let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
+    let autoSpinAxis = "z";
+    const spinQuat = new THREE.Quaternion();
+    const spinAxisVector = new THREE.Vector3(0, 0, 1);
 
     // These are the user-added rotations, separate from the automatic Fusion/CAD Z-up fix.
     const extraRotSteps = {
@@ -652,10 +756,10 @@
     function updateRotationReadout() {
       const x = normaliseDegrees(extraRotSteps.x * 90);
       const y = normaliseDegrees(extraRotSteps.y * 90);
-      const zStep = normaliseDegrees(extraRotSteps.z * 90);
-      const zController = normaliseDegrees(THREE.MathUtils.radToDeg(controllerZRotation));
-      const zTotal = normaliseDegrees(zStep + zController);
-      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${zTotal.toFixed(0)}°`;
+      const z = normaliseDegrees(extraRotSteps.z * 90);
+      const roll = normaliseDegrees(THREE.MathUtils.radToDeg(controllerLengthAxisRotation));
+      const axis = spinAxisInput.value === "auto" ? `auto/${autoSpinAxis.toUpperCase()}` : spinAxisInput.value.toUpperCase();
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis})`;
     }
 
     function disposeCurrentModel() {
@@ -729,6 +833,38 @@
       return 1.05;
     }
 
+    function detectAutoSpinAxis(object) {
+      if (!object) return;
+
+      // Measure the model before viewer rotations/scaling. For a rocket, the longest local
+      // bounding-box dimension should normally be the engine-to-nose-cone axis.
+      object.position.set(0, 0, 0);
+      object.rotation.set(0, 0, 0, "XYZ");
+      object.scale.set(1, 1, 1);
+      object.updateMatrixWorld(true);
+
+      const localBox = new THREE.Box3().setFromObject(object);
+      const localSize = localBox.getSize(new THREE.Vector3());
+
+      if (localSize.x >= localSize.y && localSize.x >= localSize.z) {
+        autoSpinAxis = "x";
+      } else if (localSize.y >= localSize.x && localSize.y >= localSize.z) {
+        autoSpinAxis = "y";
+      } else {
+        autoSpinAxis = "z";
+      }
+
+      updateRotationReadout();
+    }
+
+    function getSpinAxisVector() {
+      const selected = spinAxisInput.value === "auto" ? autoSpinAxis : spinAxisInput.value;
+
+      if (selected === "x") return spinAxisVector.set(1, 0, 0);
+      if (selected === "y") return spinAxisVector.set(0, 1, 0);
+      return spinAxisVector.set(0, 0, 1);
+    }
+
     function getTargetFloorY() {
       if (renderer.xr.isPresenting && (heightModeInput.value === "floor" || isPassthroughAR || arFloorInput.checked)) {
         return xrFloorY;
@@ -757,12 +893,13 @@
       object.rotation.y += extraRotSteps.y * quarterTurn;
       object.rotation.z += extraRotSteps.z * quarterTurn;
 
-      // Apply the right-stick Z rotation around the viewer/world Z axis.
-      // This keeps right-stick Z rotation behaving like a true Z-axis spin even
-      // after the model has been rotated from the UI around X/Y/Z.
+      // Apply the right-stick roll around the model's own local length axis.
+      // For a rocket, this is the engine-to-nose-cone axis. Because this is
+      // multiplied onto the model's local/base orientation, it still rolls around
+      // the rocket body after the UI X/Y/Z rotation buttons have been used.
       object.updateMatrix();
-      controllerZQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), controllerZRotation);
-      object.quaternion.premultiply(controllerZQuat);
+      spinQuat.setFromAxisAngle(getSpinAxisVector(), controllerLengthAxisRotation);
+      object.quaternion.multiply(spinQuat);
 
       object.updateMatrixWorld(true);
 
@@ -818,13 +955,32 @@
       const mtlName = getMtlName();
 
       setStatus(
-        `<span class="ok">Loaded:</span> ${escapeHTML(selectedObjFile?.name || "OBJ model")}\n` +
+        `<span class="ok">Loaded:</span> ${escapeHTML(getCurrentObjFile()?.name || "OBJ model")} ${selectedObjFiles.length > 1 ? "(" + (currentModelIndex + 1) + "/" + selectedObjFiles.length + ")" : ""}\n` +
         `Material: ${mtlName ? escapeHTML(mtlName) : "none selected"}\n` +
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
+    }
+
+    function getCurrentObjFile() {
+      if (!selectedObjFiles.length) return null;
+      return selectedObjFiles[currentModelIndex] || selectedObjFiles[0] || null;
+    }
+
+    function updateModelButtons() {
+      const current = getCurrentObjFile();
+      const count = selectedObjFiles.length;
+
+      xrModelName.textContent = current ? `${current.name}${count > 1 ? ` (${currentModelIndex + 1}/${count})` : ""}` : "No model";
+      xrPrevModelBtn.disabled = count <= 1;
+      xrNextModelBtn.disabled = count <= 1;
+    }
+
+    function showXRModelControls(show) {
+      xrModelControls.classList.toggle("show", !!show);
+      updateModelButtons();
     }
 
     function getMtlName() {
@@ -843,15 +999,43 @@
 
     async function loadObjFile(files) {
       const fileArray = [...(files || [])];
-      const objFile = fileArray.find(f => f.name.toLowerCase().endsWith(".obj"));
+      const objFiles = fileArray.filter(f => f.name.toLowerCase().endsWith(".obj"));
 
-      if (!objFile) {
-        setStatus("No .obj file selected. Select <b>Zenith 1.obj</b>.", true);
+      if (!objFiles.length) {
+        setStatus("No .obj file selected. Select one or more OBJ files.", true);
         return;
       }
 
-      selectedObjFile = objFile;
+      selectedObjFiles = objFiles;
+      currentModelIndex = 0;
+      updateModelButtons();
       await reloadModel(true);
+    }
+
+    async function switchModel(direction) {
+      if (!selectedObjFiles.length) {
+        setStatus("No OBJ models are loaded yet. Choose one or more OBJ files first.", true);
+        return;
+      }
+
+      if (selectedObjFiles.length <= 1) {
+        setStatus("Only one OBJ model is loaded. Choose multiple OBJ files to switch between them.");
+        return;
+      }
+
+      currentModelIndex += direction;
+
+      if (currentModelIndex < 0) {
+        currentModelIndex = selectedObjFiles.length - 1;
+      }
+
+      if (currentModelIndex >= selectedObjFiles.length) {
+        currentModelIndex = 0;
+      }
+
+      updateModelButtons();
+      await reloadModel(false);
+      showARConfirmation(`MODEL ${currentModelIndex + 1}/${selectedObjFiles.length}`);
     }
 
     async function loadMaterialFiles(files) {
@@ -868,11 +1052,11 @@
       }
       selectedMaterialFiles = [...merged.values()];
 
-      if (!selectedObjFile) {
+      if (!getCurrentObjFile()) {
         const mtlName = getMtlName();
         setStatus(
           `Material files selected${mtlName ? ": <b>" + escapeHTML(mtlName) + "</b>" : ""}.\n` +
-          `Now choose <b>Zenith 1.obj</b> to load the model.`
+          `Now choose one or more <b>OBJ</b> files to load the model.`
         );
         return;
       }
@@ -881,7 +1065,7 @@
     }
 
     async function reloadModel(resetCamera = true) {
-      if (!selectedObjFile) {
+      if (!getCurrentObjFile()) {
         setStatus("Select <b>Zenith 1.obj</b> first.", true);
         return;
       }
@@ -937,6 +1121,7 @@
         object.name = objFile.name;
 
         applyDefaultMaterials(object);
+        detectAutoSpinAxis(object);
 
         currentObject = object;
         modelRoot.add(currentObject);
@@ -1064,8 +1249,39 @@
       return null;
     }
 
-    function handleControllerTrigger(triggeringController) {
+    async function handleXRPanelSelection(triggeringController) {
+      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) return false;
+
+      triggeringController.updateMatrixWorld(true);
+      xrControllerRayOrigin.setFromMatrixPosition(triggeringController.matrixWorld);
+      xrControllerMatrix.extractRotation(triggeringController.matrixWorld);
+      xrControllerRayDirection.set(0, 0, -1).applyMatrix4(xrControllerMatrix).normalize();
+
+      xrPanelRaycaster.set(xrControllerRayOrigin, xrControllerRayDirection);
+      const hits = xrPanelRaycaster.intersectObjects([xrPrevPad, xrNextPad], false);
+
+      if (!hits.length) return false;
+
+      const target = hits[0].object;
+      if (target.name === "XR_PREV_MODEL") {
+        await switchModel(-1);
+        return true;
+      }
+
+      if (target.name === "XR_NEXT_MODEL") {
+        await switchModel(1);
+        return true;
+      }
+
+      return false;
+    }
+
+    async function handleControllerTrigger(triggeringController) {
       if (!renderer.xr.isPresenting) return;
+
+      if (await handleXRPanelSelection(triggeringController)) {
+        return;
+      }
 
       const hand = triggeringController.userData.handedness || "unknown";
 
@@ -1192,10 +1408,10 @@
       // Radians per second at full stick deflection.
       const rotationSpeed = Math.PI * 0.85;
 
-      controllerZRotation += -input * rotationSpeed * dt;
+      controllerLengthAxisRotation += -input * rotationSpeed * dt;
 
       // Keep the value bounded to avoid huge numbers after long sessions.
-      controllerZRotation = THREE.MathUtils.euclideanModulo(controllerZRotation + Math.PI, Math.PI * 2) - Math.PI;
+      controllerLengthAxisRotation = THREE.MathUtils.euclideanModulo(controllerLengthAxisRotation + Math.PI, Math.PI * 2) - Math.PI;
 
       // Recalculate centre/floor after rotation without resetting the camera or rewriting the status every frame.
       applyModelTransform(currentObject);
@@ -1242,7 +1458,7 @@
         }
 
         if (source.handedness === "right") {
-          // Right thumbstick left/right rotates the model around the global/world Z axis.
+          // Right thumbstick left/right rolls the model around its own length axis.
           rotateModelFromRightStick(x, dt);
         }
       }
@@ -1251,6 +1467,9 @@
     objInput.addEventListener("change", (event) => {
       loadObjFile(event.target.files);
     });
+
+    xrPrevModelBtn.addEventListener("click", () => switchModel(-1));
+    xrNextModelBtn.addEventListener("click", () => switchModel(1));
 
     materialInput.addEventListener("change", (event) => {
       loadMaterialFiles(event.target.files);
@@ -1263,6 +1482,7 @@
     zUpInput.addEventListener("change", () => reframeCurrentModel(true));
     floorInput.addEventListener("change", () => reframeCurrentModel(true));
     heightModeInput.addEventListener("change", () => reframeCurrentModel(true));
+    spinAxisInput.addEventListener("change", () => reframeCurrentModel(false));
 
     document.querySelectorAll("button.axis").forEach((button) => {
       button.addEventListener("click", () => {
@@ -1282,7 +1502,7 @@
       extraRotSteps.x = 0;
       extraRotSteps.y = 0;
       extraRotSteps.z = 0;
-      controllerZRotation = 0;
+      controllerLengthAxisRotation = 0;
       reframeCurrentModel(true);
     });
 
@@ -1314,6 +1534,8 @@
       // Avoid carrying the normal desktop/orbit camera offset into XR.
       camera.position.set(0, 0, 0);
       cameraRig.position.set(0, 0, 0);
+      showXRModelControls(true);
+      xrPanel.visible = true;
 
       if (isPassthroughAR) {
         scene.background = null;
@@ -1328,12 +1550,14 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To calibrate the real floor: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `A green marker and AR FLOOR SET message will confirm it worked.`
+          `A green marker and AR FLOOR SET message will confirm it worked.\n` +
+          `Use the floating Prev/Next controls or point at the in-world pads to change model.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.`
+          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
+          `Use the floating Prev/Next controls or point at the in-world pads to change model.`
         );
       }
     });
@@ -1350,6 +1574,8 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       floorMarker.visible = false;
+      showXRModelControls(false);
+      xrPanel.visible = false;
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
       reframeCurrentModel(true);
