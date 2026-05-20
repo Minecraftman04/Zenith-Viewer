@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 11</title>
+  <title>Quest OBJ Viewer version 12</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 11</h1>
+        <h1>Quest OBJ Viewer version 12</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays and a brighter compact left-controller panel. Press left <b>Y</b> to show/hide the panel.</span>
+          <span>Shows controller models/rays and a smaller bright left-controller panel. The panel renders in front of the OBJ and uses larger invisible hit areas for easier clicking.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -787,12 +787,12 @@
     leftControllerUIPanel.visible = false;
 
     // Tuned to sit above/forward from the left controller, like a small wrist tablet.
-    leftControllerUIPanel.position.set(0.025, 0.095, -0.135);
-    leftControllerUIPanel.rotation.set(-0.72, 0.06, 0.02);
-    leftControllerUIPanel.scale.setScalar(0.62);
+    leftControllerUIPanel.position.set(0.018, 0.070, -0.105);
+    leftControllerUIPanel.rotation.set(-0.68, 0.05, 0.02);
+    leftControllerUIPanel.scale.setScalar(0.42);
 
     const panelBackMaterial = new THREE.MeshBasicMaterial({
-      color: 0x26364c,
+      color: 0x6f8fba,
       transparent: true,
       opacity: 0.86,
       side: THREE.DoubleSide,
@@ -800,7 +800,7 @@
     });
 
     const leftPanelShadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.49, 0.39),
+      new THREE.PlaneGeometry(0.43, 0.325),
       new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true,
@@ -813,14 +813,14 @@
     leftControllerUIPanel.add(leftPanelShadow);
 
     const leftPanelBackground = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.47, 0.37),
+      new THREE.PlaneGeometry(0.41, 0.305),
       panelBackMaterial
     );
     leftPanelBackground.position.z = -0.006;
     leftControllerUIPanel.add(leftPanelBackground);
 
     const leftPanelBorder = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.475, 0.375)),
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.415, 0.31)),
       new THREE.LineBasicMaterial({
         color: 0xb7dfff,
         transparent: true,
@@ -832,13 +832,13 @@
     leftControllerUIPanel.add(leftPanelBorder);
 
     const leftPanelTitle = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.425, 0.052),
+      new THREE.PlaneGeometry(0.370, 0.045),
       new THREE.MeshBasicMaterial({
         map: createLabelTexture("OBJ VIEWER\n· LEFT UI", {
           width: 768,
           height: 180,
-          bgTop: "#4b6688",
-          bgBottom: "#2f4768",
+          bgTop: "#7fa4d5",
+          bgBottom: "#527ba8",
           fg: "#ffffff",
           sub: "#b7dfff",
           stroke: "rgba(124,199,255,0.75)",
@@ -852,7 +852,7 @@
         toneMapped: false
       })
     );
-    leftPanelTitle.position.set(0, 0.145, 0.006);
+    leftPanelTitle.position.set(0, 0.124, 0.006);
     leftControllerUIPanel.add(leftPanelTitle);
 
     const leftUIButtons = [];
@@ -894,8 +894,8 @@
           map: createLabelTexture(label, {
             width: 640,
             height: 190,
-            bgTop: "#526f96",
-            bgBottom: "#39577e",
+            bgTop: "#7fa4d5",
+            bgBottom: "#5f86b5",
             fg: "#f4f7fb",
             sub: "#b7c0d1",
             stroke: "rgba(255,255,255,0.22)",
@@ -918,19 +918,38 @@
       button.userData.face = face;
       button.userData.label = label;
 
+      // Larger invisible hit target. The visible UI can be small while remaining easy to click.
+      const hitBox = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 1.55, h * 1.70),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.001,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false
+        })
+      );
+      hitBox.position.z = 0.030;
+      hitBox.name = "button_hitbox";
+      hitBox.userData.ownerButton = button;
+      button.add(hitBox);
+      button.userData.hitBox = hitBox;
+
       leftControllerUIPanel.add(button);
       leftUIButtons.push(button);
       return button;
     }
 
-    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON", -0.105, 0.060, 0.190, 0.066, 0x3f7fa8, "rgba(124,199,255,0.95)");
-    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.105, 0.060, 0.190, 0.066, 0x5e7799, "rgba(124,199,255,0.95)");
-    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.105, -0.025, 0.190, 0.066, 0x4f956b, "rgba(150,240,177,0.95)");
-    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.105, -0.025, 0.190, 0.066, 0xa45460, "rgba(255,139,139,0.95)");
-    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET HEIGHT", 0, -0.110, 0.400, 0.066, 0x7869a5, "rgba(205,180,255,0.95)");
+    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON", -0.088, 0.048, 0.160, 0.052, 0x6fb7e8, "rgba(124,199,255,0.95)");
+    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.088, 0.048, 0.160, 0.052, 0x87a1c7, "rgba(124,199,255,0.95)");
+    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.088, -0.020, 0.160, 0.052, 0x7fd99c, "rgba(150,240,177,0.95)");
+    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.088, -0.020, 0.160, 0.052, 0xea737d, "rgba(255,139,139,0.95)");
+    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET", 0, -0.087, 0.336, 0.052, 0xa898e6, "rgba(205,180,255,0.95)");
 
     const leftUIHoverIndicator = new THREE.Mesh(
-      new THREE.RingGeometry(0.011, 0.017, 32),
+      new THREE.RingGeometry(0.007, 0.011, 32),
       new THREE.MeshBasicMaterial({
         color: 0xffd27c,
         transparent: false,
@@ -942,11 +961,12 @@
       })
     );
     leftUIHoverIndicator.visible = false;
-    leftUIHoverIndicator.position.z = 0.030;
+    leftUIHoverIndicator.position.z = 0.050;
+    leftUIHoverIndicator.renderOrder = 10000;
     leftControllerUIPanel.add(leftUIHoverIndicator);
 
     const leftUIStatus = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.400, 0.038),
+      new THREE.PlaneGeometry(0.336, 0.030),
       new THREE.MeshBasicMaterial({
         map: createLabelTexture("Y hides/shows UI", {
           width: 768,
@@ -968,7 +988,7 @@
         opacity: 1.0
       })
     );
-    leftUIStatus.position.set(0, -0.164, 0.010);
+    leftUIStatus.position.set(0, -0.129, 0.010);
     leftControllerUIPanel.add(leftUIStatus);
 
     function getLeftControllerGrip() {
@@ -1006,11 +1026,11 @@
       if (!force && key === leftUILastStateKey) return;
       leftUILastStateKey = key;
 
-      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x3f7fa8, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x5e7799, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x4f956b, "rgba(150,240,177,0.95)");
-      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0xa45460, "rgba(255,139,139,0.95)");
-      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET HEIGHT" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0x7869a5, "rgba(205,180,255,0.95)");
+      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x6fb7e8, "rgba(124,199,255,0.95)");
+      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x87a1c7, "rgba(124,199,255,0.95)");
+      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x7fd99c, "rgba(150,240,177,0.95)");
+      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0xea737d, "rgba(255,139,139,0.95)");
+      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET HEIGHT" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0xa898e6, "rgba(205,180,255,0.95)");
     }
 
     function updateButtonLabel(button, label, color, accent = "rgba(124,199,255,0.85)") {
@@ -1033,8 +1053,8 @@
         face.material.map = createLabelTexture(label, {
           width: 640,
           height: 190,
-          bgTop: "#526f96",
-          bgBottom: "#39577e",
+          bgTop: "#7fa4d5",
+          bgBottom: "#5f86b5",
           fg: "#f4f7fb",
           sub: "#b7c0d1",
           stroke: "rgba(255,255,255,0.22)",
@@ -1049,9 +1069,23 @@
       }
     }
 
+    function forceUIPanelOnTop() {
+      leftControllerUIPanel.traverse((child) => {
+        child.renderOrder = 9999;
+
+        if (child.material) {
+          child.material.depthTest = false;
+          child.material.depthWrite = false;
+          child.material.toneMapped = false;
+          child.material.needsUpdate = true;
+        }
+      });
+    }
+
     function updateLeftControllerUIPanel() {
       attachLeftControllerUIPanel();
       leftControllerUIPanel.visible = renderer.xr.isPresenting && showControllersInput.checked && leftControllerUIVisible;
+      forceUIPanelOnTop();
       refreshLeftControllerUILabels(false);
     }
 
@@ -1059,19 +1093,48 @@
       if (!renderer.xr.isPresenting || !leftControllerUIPanel.visible) return null;
 
       controller.updateMatrixWorld(true);
+      leftControllerUIPanel.updateMatrixWorld(true);
       xrUIPanelRayOrigin.setFromMatrixPosition(controller.matrixWorld);
       xrUIPanelMatrix.extractRotation(controller.matrixWorld);
       xrUIPanelRayDirection.set(0, 0, -1).applyMatrix4(xrUIPanelMatrix).normalize();
 
       xrUIPanelRaycaster.set(xrUIPanelRayOrigin, xrUIPanelRayDirection);
 
-      const hitTargets = leftUIButtons.map(button => button.userData.face).filter(Boolean);
+      // Prefer true raycast hits against the large invisible hitboxes.
+      const hitTargets = leftUIButtons.map(button => button.userData.hitBox).filter(Boolean);
       const hits = xrUIPanelRaycaster.intersectObjects(hitTargets, false);
 
-      if (!hits.length) return null;
+      if (hits.length) {
+        const hitBox = hits[0].object;
+        return { ...hits[0], button: hitBox.userData.ownerButton };
+      }
 
-      const face = hits[0].object;
-      return { ...hits[0], button: face.userData.ownerButton };
+      // Fallback: if the Quest controller ray is slightly offset or the panel is at a sharp
+      // angle, choose the closest button centre to the ray within a small tolerance.
+      let best = null;
+      const worldPos = new THREE.Vector3();
+
+      for (const button of leftUIButtons) {
+        button.updateMatrixWorld(true);
+        worldPos.setFromMatrixPosition(button.matrixWorld);
+
+        const toButton = worldPos.clone().sub(xrUIPanelRayOrigin);
+        const alongRay = toButton.dot(xrUIPanelRayDirection);
+
+        if (alongRay < 0.03 || alongRay > 1.4) continue;
+
+        const closest = xrUIPanelRayOrigin.clone().addScaledVector(xrUIPanelRayDirection, alongRay);
+        const distance = closest.distanceTo(worldPos);
+
+        // This tolerance is deliberately larger than the visible button because the panel is tiny.
+        const tolerance = Math.max(button.userData.width, button.userData.height) * leftControllerUIPanel.scale.x * 0.95;
+
+        if (distance <= tolerance && (!best || distance < best.distance)) {
+          best = { button, distance };
+        }
+      }
+
+      return best ? { button: best.button } : null;
     }
 
     function updateLeftUIHover() {
@@ -1098,7 +1161,7 @@
 
       if (leftUIHoveredButton) {
         leftUIHoverIndicator.visible = true;
-        leftUIHoverIndicator.position.x = leftUIHoveredButton.position.x - (leftUIHoveredButton.userData.width * 0.5) + 0.020;
+        leftUIHoverIndicator.position.x = leftUIHoveredButton.position.x - (leftUIHoveredButton.userData.width * 0.5) + 0.014;
         leftUIHoverIndicator.position.y = leftUIHoveredButton.position.y;
       } else {
         leftUIHoverIndicator.visible = false;
@@ -1107,6 +1170,8 @@
 
     function activateLeftUIButton(button) {
       if (!button) return false;
+
+      showARConfirmation("UI BUTTON PRESSED");
 
       const id = button.userData.buttonId;
 
@@ -1880,8 +1945,8 @@
         }
 
         setStatus(
-          `<span class="err">Right trigger is in UI mode.</span>\n` +
-          `Point at a left-controller UI button, or press left Y to hide the UI before setting floor/ceiling.`
+          `<span class="err">Right trigger is in UI mode but no UI button was hit.</span>\n` +
+          `Aim the green/right ray at the tiny left-controller panel, or press left Y to hide the UI before setting floor/ceiling.`
         );
         return;
       }
@@ -2433,13 +2498,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the smaller bright control panel on your left controller.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the smaller bright control panel on your left controller.`
         );
       }
     });
