@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 1</title>
+  <title>Quest OBJ Viewer version 2</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 1</h1>
+        <h1>Quest OBJ Viewer version 2</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model around its own length axis, like spinning a rocket from engine to nose cone.</span>
+          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -461,7 +461,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
       </div>
     </div>
   </div>
@@ -736,6 +736,8 @@
 
     const quarterTurn = Math.PI / 2;
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
+    let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
+    let rightStickWasPressed = false;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
@@ -790,7 +792,7 @@
       const z = normaliseDegrees(extraRotSteps.z * 90);
       const roll = normaliseDegrees(THREE.MathUtils.radToDeg(controllerLengthAxisRotation));
       const axis = spinAxisInput.value === "auto" ? `auto/${autoSpinAxis.toUpperCase()}` : spinAxisInput.value.toUpperCase();
-      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis})`;
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis}) | Height offset: ${modelVerticalOffset.toFixed(2)} m`;
     }
 
     function disposeCurrentModel() {
@@ -977,6 +979,9 @@
         object.position.y += 0 - boxBeforeHeight.min.y;
       }
 
+      // Extra model height adjustment from the right thumbstick.
+      object.position.y += modelVerticalOffset;
+
       object.updateMatrixWorld(true);
 
       const box = new THREE.Box3().setFromObject(object);
@@ -1039,6 +1044,8 @@
       }
 
       selectedObjFile = objFile;
+      modelVerticalOffset = 0;
+      rightStickWasPressed = false;
       await reloadModel(true);
     }
 
@@ -1194,15 +1201,7 @@
       updateGrid();
 
       if (currentObject && renderer.xr.isPresenting) {
-        const box = new THREE.Box3().setFromObject(currentObject);
-        currentObject.position.y += xrFloorY - box.min.y;
-        currentObject.updateMatrixWorld(true);
-
-        const newBox = new THREE.Box3().setFromObject(currentObject);
-        modelInfo.box = newBox;
-        modelInfo.center = newBox.getCenter(new THREE.Vector3());
-        modelInfo.size = newBox.getSize(new THREE.Vector3());
-        modelInfo.maxDim = Math.max(modelInfo.size.x, modelInfo.size.y, modelInfo.size.z, 0.1);
+        applyModelTransform(currentObject);
       }
 
       updateFloorMarker(true);
@@ -1390,6 +1389,50 @@
       applyModelTransform(currentObject);
     }
 
+    function moveModelHeightFromRightStick(yAxis, dt) {
+      if (!currentObject) return;
+
+      const input = applyDeadzone(yAxis);
+      if (input === 0) return;
+
+      // Metres per second at full stick deflection.
+      const verticalSpeed = 0.45;
+
+      // Pushing the stick up usually gives a negative Y axis value, so invert it.
+      modelVerticalOffset += -input * verticalSpeed * dt;
+
+      // Keep it sensible so the model cannot accidentally disappear kilometres away.
+      modelVerticalOffset = THREE.MathUtils.clamp(modelVerticalOffset, -3.0, 3.0);
+
+      applyModelTransform(currentObject);
+    }
+
+    function resetModelHeightToFloor(showMessage = true) {
+      modelVerticalOffset = 0;
+
+      if (currentObject) {
+        applyModelTransform(currentObject);
+      }
+
+      if (showMessage) {
+        showARConfirmation("MODEL RESET TO FLOOR");
+        setStatus(
+          `<span class="ok">Model height reset.</span>\n` +
+          `The model base has been returned to the current floor level.`
+        );
+      }
+    }
+
+    function isRightStickPressed(gamepad) {
+      if (!gamepad || !gamepad.buttons) return false;
+
+      // Quest thumbstick click is commonly button 3. Some browsers expose stick clicks
+      // on buttons 3/4, so accept either if pressed.
+      const b3 = gamepad.buttons[3]?.pressed || false;
+      const b4 = gamepad.buttons[4]?.pressed || false;
+      return b3 || b4;
+    }
+
     function handleXRMovement(dt) {
       if (!renderer.xr.isPresenting) return;
 
@@ -1408,6 +1451,7 @@
       if (right.lengthSq() > 0) right.normalize();
 
       const moveSpeed = 1.35; // metres per second
+      let sawRightController = false;
 
       for (const source of session.inputSources) {
         const gp = source.gamepad;
@@ -1431,9 +1475,25 @@
         }
 
         if (source.handedness === "right") {
+          sawRightController = true;
+
           // Right thumbstick left/right rolls the model around its own length axis.
           rotateModelFromRightStick(x, dt);
+
+          // Right thumbstick up/down moves the model itself up/down.
+          moveModelHeightFromRightStick(y, dt);
+
+          // Clicking the right thumbstick resets model height back to floor level.
+          const stickPressed = isRightStickPressed(gp);
+          if (stickPressed && !rightStickWasPressed) {
+            resetModelHeightToFloor(true);
+          }
+          rightStickWasPressed = stickPressed;
         }
+      }
+
+      if (!sawRightController) {
+        rightStickWasPressed = false;
       }
     }
 
@@ -1542,6 +1602,7 @@
       xrFloorY = 0;
       xrFloorAutoSet = false;
       xrFloorManual = false;
+      rightStickWasPressed = false;
       floorMarker.visible = false;
       updateControllerVisuals();
       arConfirm.classList.remove("show");
