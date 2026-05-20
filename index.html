@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 4</title>
+  <title>Quest OBJ Viewer version 5</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 4</h1>
+        <h1>Quest OBJ Viewer version 5</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays attached to the same XR rig as the headset, so they stay aligned with your real controllers.</span>
+          <span>Shows controller models/rays and a small control panel attached to the left controller.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off. A small clickable UI panel is attached to the left controller; point at it with the right controller and press trigger.
       </div>
     </div>
   </div>
@@ -681,6 +681,7 @@
       if (ray.material && ray.material.color) ray.material.color.setHex(color);
 
       updateControllerVisuals();
+      updateLeftControllerUIPanel();
     }
 
     controller1.addEventListener("connected", (event) => rememberControllerHand(controller1, controllerGrip1, gripMarker1, controllerRay1, 0, event));
@@ -693,6 +694,263 @@
     // Put the LEFT controller on the real floor, then press the RIGHT trigger.
     controller1.addEventListener("selectstart", () => handleControllerTrigger(controller1));
     controller2.addEventListener("selectstart", () => handleControllerTrigger(controller2));
+
+    function createLabelTexture(text, opts = {}) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 160;
+      const ctx = canvas.getContext("2d");
+
+      const bg = opts.bg || "rgba(16, 22, 32, 0.92)";
+      const fg = opts.fg || "#f4f7fb";
+      const stroke = opts.stroke || "rgba(255,255,255,0.22)";
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = bg;
+      roundRect(ctx, 10, 10, canvas.width - 20, canvas.height - 20, 34);
+      ctx.fill();
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      ctx.fillStyle = fg;
+      ctx.font = "700 38px system-ui, -apple-system, Segoe UI, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      const lines = String(text).split("\n");
+      const lineHeight = 44;
+      const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+
+      lines.forEach((line, i) => {
+        ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
+      });
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      return texture;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+    const leftControllerUIPanel = new THREE.Group();
+    leftControllerUIPanel.name = "left_controller_ui_panel";
+    leftControllerUIPanel.visible = false;
+    leftControllerUIPanel.position.set(0.02, 0.11, -0.18);
+    leftControllerUIPanel.rotation.set(-0.65, 0.0, 0.0);
+
+    const leftPanelBackground = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.48, 0.36),
+      new THREE.MeshBasicMaterial({
+        color: 0x101722,
+        transparent: true,
+        opacity: 0.82,
+        side: THREE.DoubleSide,
+        depthTest: false
+      })
+    );
+    leftPanelBackground.position.z = -0.004;
+    leftControllerUIPanel.add(leftPanelBackground);
+
+    const leftPanelTitle = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.44, 0.055),
+      new THREE.MeshBasicMaterial({
+        map: createLabelTexture("LEFT CONTROLLER UI", {
+          bg: "rgba(26, 34, 50, 0.96)",
+          fg: "#ffffff",
+          stroke: "rgba(124,199,255,0.6)"
+        }),
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthTest: false
+      })
+    );
+    leftPanelTitle.position.set(0, 0.135, 0.004);
+    leftControllerUIPanel.add(leftPanelTitle);
+
+    const leftUIButtons = [];
+    let leftUIHoveredButton = null;
+
+    function makeLeftUIButton(id, label, x, y, w = 0.20, h = 0.068, color = 0x243244) {
+      const button = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, h),
+        new THREE.MeshBasicMaterial({
+          map: createLabelTexture(label, {
+            bg: "rgba(32, 44, 62, 0.98)",
+            fg: "#f4f7fb",
+            stroke: "rgba(255,255,255,0.24)"
+          }),
+          color,
+          transparent: true,
+          opacity: 0.96,
+          side: THREE.DoubleSide,
+          depthTest: false
+        })
+      );
+
+      button.position.set(x, y, 0.012);
+      button.userData.buttonId = id;
+      button.userData.baseColor = color;
+      button.userData.hoverColor = 0xffd27c;
+      leftControllerUIPanel.add(button);
+      leftUIButtons.push(button);
+      return button;
+    }
+
+    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON/OFF", -0.115, 0.055, 0.21, 0.075, 0x28405a);
+    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.115, 0.055, 0.21, 0.075, 0x344052);
+    const leftUIFloorButton = makeLeftUIButton("mode_floor", "SET\nFLOOR", -0.115, -0.035, 0.21, 0.075, 0x27523a);
+    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "SET\nCEIL", 0.115, -0.035, 0.21, 0.075, 0x653236);
+    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET\nHEIGHT", 0, -0.125, 0.44, 0.075, 0x49405f);
+
+    function getLeftControllerGrip() {
+      if (controllerGrip1.userData.handedness === "left") return controllerGrip1;
+      if (controllerGrip2.userData.handedness === "left") return controllerGrip2;
+      return controllerGrip1;
+    }
+
+    function getRightController() {
+      if (controller1.userData.handedness === "right") return controller1;
+      if (controller2.userData.handedness === "right") return controller2;
+      return controller2;
+    }
+
+    function attachLeftControllerUIPanel() {
+      const leftGrip = getLeftControllerGrip();
+
+      if (leftControllerUIPanel.parent !== leftGrip) {
+        leftGrip.add(leftControllerUIPanel);
+      }
+    }
+
+    function refreshLeftControllerUILabels() {
+      const cutLabel = clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF";
+      updateButtonLabel(leftUICutButton, cutLabel, clippingEnabledInput.checked ? 0x28405a : 0x50313a);
+      updateButtonLabel(leftUIAutoButton, "AUTO", clipSetModeInput.value === "auto" ? 0x5a4d28 : 0x344052);
+      updateButtonLabel(leftUIFloorButton, "SET\nFLOOR", clipSetModeInput.value === "floor" ? 0x4f7f45 : 0x27523a);
+      updateButtonLabel(leftUICeilingButton, "SET\nCEIL", clipSetModeInput.value === "ceiling" ? 0x914349 : 0x653236);
+    }
+
+    function updateButtonLabel(button, label, color) {
+      if (!button || !button.material) return;
+
+      if (button.material.map) {
+        button.material.map.dispose();
+      }
+
+      button.material.map = createLabelTexture(label, {
+        bg: "rgba(32, 44, 62, 0.98)",
+        fg: "#f4f7fb",
+        stroke: "rgba(255,255,255,0.24)"
+      });
+      button.material.color.setHex(color);
+      button.userData.baseColor = color;
+      button.material.needsUpdate = true;
+    }
+
+    function updateLeftControllerUIPanel() {
+      attachLeftControllerUIPanel();
+      leftControllerUIPanel.visible = renderer.xr.isPresenting;
+      refreshLeftControllerUILabels();
+    }
+
+    function getUIPanelHit(controller) {
+      if (!renderer.xr.isPresenting || !leftControllerUIPanel.visible) return null;
+
+      controller.updateMatrixWorld(true);
+      xrUIPanelRayOrigin.setFromMatrixPosition(controller.matrixWorld);
+      xrUIPanelMatrix.extractRotation(controller.matrixWorld);
+      xrUIPanelRayDirection.set(0, 0, -1).applyMatrix4(xrUIPanelMatrix).normalize();
+
+      xrUIPanelRaycaster.set(xrUIPanelRayOrigin, xrUIPanelRayDirection);
+      const hits = xrUIPanelRaycaster.intersectObjects(leftUIButtons, false);
+      return hits.length ? hits[0] : null;
+    }
+
+    function updateLeftUIHover() {
+      const rightController = getRightController();
+      const hit = getUIPanelHit(rightController);
+      leftUIHoveredButton = hit ? hit.object : null;
+
+      for (const button of leftUIButtons) {
+        const isHover = button === leftUIHoveredButton;
+        button.material.color.setHex(isHover ? button.userData.hoverColor : button.userData.baseColor);
+        button.material.opacity = isHover ? 1.0 : 0.96;
+        button.scale.setScalar(isHover ? 1.12 : 1.0);
+      }
+    }
+
+    function activateLeftUIButton(button) {
+      if (!button) return false;
+
+      const id = button.userData.buttonId;
+
+      if (id === "toggle_cut") {
+        toggleClippingCuts(true);
+        refreshLeftControllerUILabels();
+        return true;
+      }
+
+      if (id === "mode_auto") {
+        clipSetModeInput.value = "auto";
+        showARConfirmation("CUT MODE AUTO");
+        setStatus(`<span class="ok">Cut mode set to Auto.</span>\nLow left controller sets floor; higher left controller sets ceiling.`);
+        refreshLeftControllerUILabels();
+        return true;
+      }
+
+      if (id === "mode_floor") {
+        clipSetModeInput.value = "floor";
+        showARConfirmation("SET FLOOR MODE");
+        setStatus(`<span class="ok">Cut mode set to Floor.</span>\nPut the left controller on the floor and press the right trigger.`);
+        refreshLeftControllerUILabels();
+        return true;
+      }
+
+      if (id === "mode_ceiling") {
+        clipSetModeInput.value = "ceiling";
+        showARConfirmation("SET CEILING MODE");
+        setStatus(`<span class="ok">Cut mode set to Ceiling.</span>\nHold the left controller at the ceiling/cut height and press the right trigger.`);
+        refreshLeftControllerUILabels();
+        return true;
+      }
+
+      if (id === "reset_height") {
+        resetModelHeightToFloor(true);
+        return true;
+      }
+
+      return false;
+    }
+
+    function handleLeftControllerUISelection(triggeringController) {
+      if (!renderer.xr.isPresenting) return false;
+
+      const hand = triggeringController.userData.handedness || "unknown";
+
+      // Use the right controller ray to press the UI mounted on the left controller.
+      if (hand !== "right" && hand !== "unknown") {
+        return false;
+      }
+
+      const hit = getUIPanelHit(triggeringController);
+      if (!hit) return false;
+
+      return activateLeftUIButton(hit.object);
+    }
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
     scene.add(hemiLight);
@@ -839,6 +1097,10 @@
     const xrQuat = new THREE.Quaternion();
     const xrCamPos = new THREE.Vector3();
     const controllerPos = new THREE.Vector3();
+    const xrUIPanelRayOrigin = new THREE.Vector3();
+    const xrUIPanelRayDirection = new THREE.Vector3();
+    const xrUIPanelMatrix = new THREE.Matrix4();
+    const xrUIPanelRaycaster = new THREE.Raycaster();
 
     const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only if Quest reports the XR origin at head height.
     let isPassthroughAR = false;
@@ -1379,6 +1641,10 @@
     function handleControllerTrigger(triggeringController) {
       if (!renderer.xr.isPresenting) return;
 
+      if (handleLeftControllerUISelection(triggeringController)) {
+        return;
+      }
+
       const hand = triggeringController.userData.handedness || "unknown";
 
       // Only right trigger confirms floor/ceiling clipping. This avoids accidentally setting
@@ -1827,7 +2093,10 @@
       updateClippingPlanes();
       updateFloorMarker(true);
       updateCeilingMarker(true);
+      refreshLeftControllerUILabels();
     });
+
+    clipSetModeInput.addEventListener("change", refreshLeftControllerUILabels);
 
     renderer.xr.addEventListener("sessionstart", () => {
       const session = renderer.xr.getSession();
@@ -1855,13 +2124,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them.`
+          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them. A control panel sits on your left controller.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them.`
+          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them. A control panel sits on your left controller.`
         );
       }
     });
@@ -1883,6 +2152,7 @@
       leftXButtonWasPressed = false;
       floorMarker.visible = false;
       ceilingMarker.visible = false;
+      leftControllerUIPanel.visible = false;
       updateClippingPlanes();
       updateControllerVisuals();
       arConfirm.classList.remove("show");
@@ -1897,6 +2167,8 @@
       if (renderer.xr.isPresenting) {
         autoDetectXRFloor();
         updateControllerVisuals();
+        updateLeftControllerUIPanel();
+        updateLeftUIHover();
       }
 
       if (arConfirmTimer > 0) {
