@@ -41,7 +41,7 @@
       position: fixed;
       top: max(12px, env(safe-area-inset-top));
       left: max(12px, env(safe-area-inset-left));
-      width: min(420px, calc(100vw - 24px));
+      width: min(460px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       overflow: auto;
       padding: 14px;
@@ -113,6 +113,13 @@
       font-size: 13px;
     }
 
+    button.axis {
+      min-width: 68px;
+      padding: 8px 10px;
+      min-height: 38px;
+      border-radius: 12px;
+    }
+
     input[type="file"] {
       display: none;
     }
@@ -122,6 +129,45 @@
       gap: 8px;
       flex-wrap: wrap;
       margin: 10px 0;
+    }
+
+    .axisPanel {
+      margin: 10px 0;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .axisTitle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .axisTitle b {
+      font-size: 14px;
+    }
+
+    .axisGrid {
+      display: grid;
+      grid-template-columns: 34px 1fr 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .axisGrid .label {
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .rotationReadout {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
     }
 
     .control {
@@ -199,6 +245,8 @@
       h1 { font-size: 16px; }
       button, label.filebutton { width: 100%; }
       .row button, .row label.filebutton { flex: 1 1 140px; }
+      .axisGrid { grid-template-columns: 28px 1fr 1fr; }
+      button.axis { min-width: 0; }
     }
   </style>
 
@@ -227,6 +275,31 @@
         <label class="filebutton primary" for="fileInput">Choose OBJ / MTL / Textures</label>
         <input id="fileInput" type="file" multiple accept=".obj,.mtl,.png,.jpg,.jpeg,.webp,.bmp,.gif,.tga,.exr" />
         <button id="resetBtn">Reset view</button>
+      </div>
+
+      <div class="axisPanel">
+        <div class="axisTitle">
+          <b>Rotate model in 90° steps</b>
+          <button id="resetRotationBtn" class="small">Reset rotation</button>
+        </div>
+
+        <div class="axisGrid">
+          <div class="label">X</div>
+          <button class="axis" data-axis="x" data-dir="-1">X −90°</button>
+          <button class="axis" data-axis="x" data-dir="1">X +90°</button>
+
+          <div class="label">Y</div>
+          <button class="axis" data-axis="y" data-dir="-1">Y −90°</button>
+          <button class="axis" data-axis="y" data-dir="1">Y +90°</button>
+
+          <div class="label">Z</div>
+          <button class="axis" data-axis="z" data-dir="-1">Z −90°</button>
+          <button class="axis" data-axis="z" data-dir="1">Z +90°</button>
+        </div>
+
+        <div id="rotationReadout" class="rotationReadout">
+          Extra rotation: X 0°, Y 0°, Z 0°
+        </div>
       </div>
 
       <div class="control">
@@ -273,7 +346,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom. In VR, physically walk around or use the thumbstick.
-        If the Enter VR button does not appear, your browser may not allow WebXR from this page location; try serving this file over HTTPS.
+        If the Enter VR button does not appear, your browser may not allow WebXR from this page location; use GitHub Pages or another HTTPS host.
       </div>
     </div>
   </div>
@@ -295,6 +368,8 @@
     const moveInput = document.getElementById("moveInput");
     const resetBtn = document.getElementById("resetBtn");
     const collapseBtn = document.getElementById("collapseBtn");
+    const resetRotationBtn = document.getElementById("resetRotationBtn");
+    const rotationReadout = document.getElementById("rotationReadout");
     const ui = document.getElementById("ui");
 
     const scene = new THREE.Scene();
@@ -352,11 +427,21 @@
     let currentObject = null;
     let lastFiles = null;
     let objectURLs = [];
+
     let modelInfo = {
       loaded: false,
       size: new THREE.Vector3(1, 1, 1),
       center: new THREE.Vector3(),
       maxDim: 2
+    };
+
+    const quarterTurn = Math.PI / 2;
+
+    // These are the user-added rotations, separate from the automatic Fusion/CAD Z-up fix.
+    const extraRotSteps = {
+      x: 0,
+      y: 0,
+      z: 0
     };
 
     const defaultMaterial = new THREE.MeshStandardMaterial({
@@ -366,7 +451,6 @@
     });
 
     const clock = new THREE.Clock();
-    const tempVec = new THREE.Vector3();
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
     const xrQuat = new THREE.Quaternion();
@@ -374,6 +458,20 @@
     function setStatus(html, isError = false) {
       statusEl.innerHTML = html;
       statusEl.className = isError ? "err" : "";
+    }
+
+    function normaliseDegrees(deg) {
+      let value = deg % 360;
+      if (value > 180) value -= 360;
+      if (value <= -180) value += 360;
+      return value;
+    }
+
+    function updateRotationReadout() {
+      const x = normaliseDegrees(extraRotSteps.x * 90);
+      const y = normaliseDegrees(extraRotSteps.y * 90);
+      const z = normaliseDegrees(extraRotSteps.z * 90);
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}°`;
     }
 
     function disposeCurrentModel() {
@@ -437,16 +535,22 @@
       });
     }
 
-    function frameObject(object) {
+    function applyModelTransform(object) {
+      if (!object) return;
+
       const scale = Number(scaleInput.value) || 0.001;
 
       object.scale.setScalar(scale);
-      object.rotation.set(0, 0, 0);
+      object.rotation.set(0, 0, 0, "XYZ");
       object.position.set(0, 0, 0);
 
       if (zUpInput.checked) {
-        object.rotation.x = -Math.PI / 2;
+        object.rotation.x += -Math.PI / 2;
       }
+
+      object.rotation.x += extraRotSteps.x * quarterTurn;
+      object.rotation.y += extraRotSteps.y * quarterTurn;
+      object.rotation.z += extraRotSteps.z * quarterTurn;
 
       object.updateMatrixWorld(true);
 
@@ -470,13 +574,24 @@
       camera.far = Math.max(2000, maxDim * 25);
       camera.updateProjectionMatrix();
 
-      resetView();
+      updateRotationReadout();
+    }
+
+    function frameObject(object, resetCamera = true) {
+      applyModelTransform(object);
+
+      if (resetCamera) {
+        resetView();
+      }
+
+      const scale = Number(scaleInput.value) || 0.001;
+      const size = modelInfo.size;
 
       setStatus(
         `<span class="ok">Loaded:</span> ${escapeHTML(getObjName(lastFiles) || "OBJ model")}\n` +
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
-        `Use <b>Enter VR</b> for 1:1 scale on Quest 3.`
+        `Use the X/Y/Z buttons for 90° rotation steps, then <b>Enter VR</b> for 1:1 scale.`
       );
     }
 
@@ -551,7 +666,7 @@
 
         currentObject = object;
         modelRoot.add(currentObject);
-        frameObject(currentObject);
+        frameObject(currentObject, true);
       } catch (err) {
         console.error(err);
         setStatus("Could not load the OBJ.\n" + escapeHTML(err.message || err), true);
@@ -578,8 +693,12 @@
       floor.visible = gridInput.checked;
     }
 
-    function reloadIfPossible() {
-      if (lastFiles && lastFiles.length) loadFiles(lastFiles);
+    function reframeCurrentModel(resetCamera = false) {
+      if (currentObject) {
+        frameObject(currentObject, resetCamera);
+      } else {
+        updateRotationReadout();
+      }
     }
 
     function handleXRMovement(dt) {
@@ -627,9 +746,31 @@
 
     resetBtn.addEventListener("click", resetView);
     gridInput.addEventListener("change", updateGrid);
-    scaleInput.addEventListener("change", reloadIfPossible);
-    zUpInput.addEventListener("change", reloadIfPossible);
-    floorInput.addEventListener("change", reloadIfPossible);
+
+    scaleInput.addEventListener("change", () => reframeCurrentModel(true));
+    zUpInput.addEventListener("change", () => reframeCurrentModel(true));
+    floorInput.addEventListener("change", () => reframeCurrentModel(true));
+
+    document.querySelectorAll("button.axis").forEach((button) => {
+      button.addEventListener("click", () => {
+        const axis = button.dataset.axis;
+        const dir = Number(button.dataset.dir || 1);
+
+        extraRotSteps[axis] += dir;
+
+        // Keep the stored values small so they do not grow forever.
+        extraRotSteps[axis] = ((extraRotSteps[axis] % 4) + 4) % 4;
+
+        reframeCurrentModel(false);
+      });
+    });
+
+    resetRotationBtn.addEventListener("click", () => {
+      extraRotSteps.x = 0;
+      extraRotSteps.y = 0;
+      extraRotSteps.z = 0;
+      reframeCurrentModel(true);
+    });
 
     collapseBtn.addEventListener("click", () => {
       ui.classList.toggle("collapsed");
@@ -655,6 +796,7 @@
     });
 
     updateGrid();
+    updateRotationReadout();
     resetView();
 
     if (!navigator.xr) {
