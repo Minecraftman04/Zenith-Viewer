@@ -222,6 +222,29 @@
       white-space: pre-wrap;
     }
 
+    #arConfirm {
+      position: fixed;
+      left: 50%;
+      top: max(18px, env(safe-area-inset-top));
+      transform: translateX(-50%);
+      z-index: 30;
+      display: none;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(150,240,177,0.7);
+      background: rgba(18, 60, 34, 0.82);
+      color: #d9ffe4;
+      font-weight: 800;
+      font-size: 14px;
+      box-shadow: 0 12px 44px rgba(0,0,0,0.45);
+      backdrop-filter: blur(12px);
+      pointer-events: none;
+    }
+
+    #arConfirm.show {
+      display: block;
+    }
+
     .hint {
       color: var(--muted);
       font-size: 12px;
@@ -279,6 +302,7 @@
 </head>
 
 <body>
+  <div id="arConfirm">AR FLOOR SET</div>
   <div id="ui">
     <div class="topbar">
       <div>
@@ -351,7 +375,7 @@
       <div class="control">
         <div>
           <b>Small model viewing height</b><br />
-          <span>Optional for normal VR/browser viewing. AR mode uses floor placement, not a head-height value.</span>
+          <span>For a 30 cm model, use floor mode for true-size placement, or raise it for close inspection outside XR.</span>
         </div>
         <select id="heightModeInput">
           <option value="floor" selected>On floor / original</option>
@@ -388,16 +412,27 @@
       <div class="control">
         <div>
           <b>AR floor placement</b><br />
-          <span>In passthrough, look at the real floor until the blue ring appears, then press trigger/A or this button. No head-height value is used.</span>
+          <span>In passthrough, keep the bottom of the model on the calibrated floor. No head-height value is needed.</span>
         </div>
-        <button id="placeARBtn" class="small">Place on floor</button>
+        <input id="arFloorInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>XR floor calibration</b><br />
+          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press the <b>right trigger</b>. You can also nudge the floor up/down.</span>
+        </div>
+        <div class="row" style="justify-content:flex-end;margin:0;">
+          <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
+          <button id="floorDownBtn" class="small" type="button">Floor −10 cm</button>
+        </div>
       </div>
 
       <div id="status">Select <b>Zenith 1.obj</b> first, then use <b>Add MTL / Textures</b> to apply the material file separately.</div>
 
       <div class="hint">
-        Touch/drag to rotate outside VR. Pinch or wheel to zoom. For a small 30 cm model, use “Top at head height”.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In AR, look at the real floor until the blue ring appears, then place the model. No head-height value is used. If buttons do not appear, use GitHub Pages or another HTTPS host.
+        Touch/drag to rotate outside VR. Pinch or wheel to zoom.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration. No head-height setting is used.
       </div>
     </div>
   </div>
@@ -421,12 +456,15 @@
     const gridInput = document.getElementById("gridInput");
     const moveInput = document.getElementById("moveInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
-    const placeARBtn = document.getElementById("placeARBtn");
+    const arFloorInput = document.getElementById("arFloorInput");
+    const floorUpBtn = document.getElementById("floorUpBtn");
+    const floorDownBtn = document.getElementById("floorDownBtn");
     const resetBtn = document.getElementById("resetBtn");
     const collapseBtn = document.getElementById("collapseBtn");
     const resetRotationBtn = document.getElementById("resetRotationBtn");
     const rotationReadout = document.getElementById("rotationReadout");
     const ui = document.getElementById("ui");
+    const arConfirm = document.getElementById("arConfirm");
 
     const scene = new THREE.Scene();
     const normalBackground = new THREE.Color(0x0b0d12);
@@ -446,8 +484,7 @@
     document.body.appendChild(vrButton);
 
     const arButton = ARButton.createButton(renderer, {
-      requiredFeatures: ["local-floor"],
-      optionalFeatures: ["hit-test", "bounded-floor", "dom-overlay"],
+      optionalFeatures: ["local-floor", "bounded-floor", "dom-overlay"],
       domOverlay: { root: document.body }
     });
     arButton.textContent = arButton.textContent.replace("AR", "PASSTHROUGH");
@@ -469,6 +506,26 @@
     controls.dampingFactor = 0.06;
     controls.screenSpacePanning = true;
 
+    const controller1 = renderer.xr.getController(0);
+    const controller2 = renderer.xr.getController(1);
+    const controllerGrip1 = renderer.xr.getControllerGrip(0);
+    const controllerGrip2 = renderer.xr.getControllerGrip(1);
+    scene.add(controller1, controller2, controllerGrip1, controllerGrip2);
+
+    function rememberControllerHand(controller, index, event) {
+      const handedness = event?.data?.handedness || "unknown";
+      controller.userData.index = index;
+      controller.userData.handedness = handedness;
+    }
+
+    controller1.addEventListener("connected", (event) => rememberControllerHand(controller1, 0, event));
+    controller2.addEventListener("connected", (event) => rememberControllerHand(controller2, 1, event));
+
+    // Desired workflow:
+    // Put the LEFT controller on the real floor, then press the RIGHT trigger.
+    controller1.addEventListener("selectstart", () => handleControllerTrigger(controller1));
+    controller2.addEventListener("selectstart", () => handleControllerTrigger(controller2));
+
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
     scene.add(hemiLight);
 
@@ -489,15 +546,46 @@
     grid.position.y = 0.001;
     scene.add(grid);
 
-    // AR floor placement reticle. In passthrough, look at the real floor;
-    // when WebXR hit-testing finds it, this ring appears there.
-    const reticle = new THREE.Mesh(
-      new THREE.RingGeometry(0.08, 0.105, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x7cc7ff })
+    // Visible confirmation marker for XR/AR floor calibration.
+    const floorMarker = new THREE.Group();
+    floorMarker.visible = false;
+    scene.add(floorMarker);
+
+    const floorRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.10, 0.16, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x96f0b1,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.92
+      })
     );
-    reticle.matrixAutoUpdate = false;
-    reticle.visible = false;
-    scene.add(reticle);
+    floorRing.rotation.x = -Math.PI / 2;
+    floorMarker.add(floorRing);
+
+    const floorDot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.045, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x96f0b1,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.95
+      })
+    );
+    floorDot.rotation.x = -Math.PI / 2;
+    floorDot.position.y = 0.002;
+    floorMarker.add(floorDot);
+
+    const floorStem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.45, 16),
+      new THREE.MeshBasicMaterial({
+        color: 0x96f0b1,
+        transparent: true,
+        opacity: 0.70
+      })
+    );
+    floorStem.position.y = 0.225;
+    floorMarker.add(floorStem);
 
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
@@ -533,13 +621,19 @@
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
     const xrQuat = new THREE.Quaternion();
+    const xrCamPos = new THREE.Vector3();
+    const controllerPos = new THREE.Vector3();
 
+    const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only if Quest reports the XR origin at head height.
     let isPassthroughAR = false;
     let previousFloorVisible = true;
     let previousGridVisible = true;
-    let hitTestSource = null;
-    let hitTestSourceRequested = false;
-    let arModelPlaced = false;
+    let xrFloorY = 0;
+    let xrFloorAutoSet = false;
+    let xrFloorManual = false;
+    let xrFloorMarkerX = 0;
+    let xrFloorMarkerZ = 0;
+    let arConfirmTimer = 0;
 
     function setStatus(html, isError = false) {
       statusEl.innerHTML = html;
@@ -622,8 +716,7 @@
     }
 
     function getHeadHeight() {
-      // Fixed comfortable reference height for the optional non-AR viewing modes.
-      // AR/passthrough never uses this; AR placement comes from floor hit-testing.
+      // Internal default only. There is deliberately no head-height setting in the UI.
       return 1.6;
     }
 
@@ -632,12 +725,21 @@
       return 1.05;
     }
 
+    function getTargetFloorY() {
+      if (renderer.xr.isPresenting && (heightModeInput.value === "floor" || isPassthroughAR || arFloorInput.checked)) {
+        return xrFloorY;
+      }
+      return 0;
+    }
+
     function applyModelTransform(object) {
       if (!object) return;
 
       const scale = Number(scaleInput.value) || 0.001;
       const heightMode = heightModeInput.value;
       const headHeight = getHeadHeight();
+      const forceXRFloor = renderer.xr.isPresenting && (heightMode === "floor" || isPassthroughAR || arFloorInput.checked);
+      const targetFloorY = getTargetFloorY();
 
       object.scale.setScalar(scale);
       object.rotation.set(0, 0, 0, "XYZ");
@@ -653,21 +755,20 @@
 
       object.updateMatrixWorld(true);
 
-      // Always centre X/Z around the modelRoot origin. In AR, modelRoot is moved
-      // onto the real-world floor hit-test point, so the model sits exactly there.
+      // Always centre X/Z for viewing, because this is more useful in VR/AR.
       const boxInitial = new THREE.Box3().setFromObject(object);
       const centerInitial = boxInitial.getCenter(new THREE.Vector3());
       object.position.x -= centerInitial.x;
       object.position.z -= centerInitial.z;
       object.updateMatrixWorld(true);
 
+      // Work out the model bounds after X/Z centring.
       const boxBeforeHeight = new THREE.Box3().setFromObject(object);
       const centerBeforeHeight = boxBeforeHeight.getCenter(new THREE.Vector3());
 
-      if (isPassthroughAR) {
-        // AR mode always puts the model bottom at the modelRoot floor point.
-        // No head-height value is involved.
-        object.position.y += 0 - boxBeforeHeight.min.y;
+      if (forceXRFloor) {
+        // In XR, use the runtime-calibrated floor rather than a head-height value.
+        object.position.y += targetFloorY - boxBeforeHeight.min.y;
       } else if (heightMode === "topHead") {
         object.position.y += headHeight - boxBeforeHeight.max.y;
       } else if (heightMode === "centreHead") {
@@ -709,7 +810,7 @@
         `<span class="ok">Loaded:</span> ${escapeHTML(selectedObjFile?.name || "OBJ model")}\n` +
         `Material: ${mtlName ? escapeHTML(mtlName) : "none selected"}\n` +
         `Scale: ${scale}  |  Units: mm → metres\n` +
-        `Viewing height: ${isPassthroughAR && arFloorInput.checked ? "AR floor placement" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
+        `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -837,13 +938,10 @@
 
     function resetView() {
       const maxDim = modelInfo.loaded ? modelInfo.maxDim : 2;
-      const height = modelInfo.loaded ? modelInfo.size.y : 1.6;
       const center = modelInfo.loaded ? modelInfo.center : new THREE.Vector3(0, 0.8, 0);
       const heightMode = heightModeInput.value;
       const isSmallRaisedModel = modelInfo.loaded && maxDim < 0.75 && heightMode !== "floor";
 
-      // For small raised models, start closer so a 30 cm part is not tiny in VR.
-      // For larger models, keep the original more distant framing.
       const distance = isSmallRaisedModel
         ? Math.max(maxDim * 2.2, 0.65)
         : Math.max(maxDim * 1.35, 2.2);
@@ -855,12 +953,14 @@
       controls.target.set(center.x, center.y, center.z);
       controls.update();
 
-      // In VR this is your starting position. Small models start close enough to inspect,
-      // while still leaving room to physically walk around them.
       cameraRig.position.set(0, 0, isSmallRaisedModel ? Math.max(distance, 0.65) : Math.max(maxDim * 0.7, 1.5));
     }
 
     function updateGrid() {
+      const floorY = renderer.xr.isPresenting ? xrFloorY : 0;
+      floor.position.y = floorY;
+      grid.position.y = floorY + 0.001;
+
       if (isPassthroughAR && arHideFloorInput.checked) {
         floor.visible = false;
         grid.visible = false;
@@ -879,94 +979,165 @@
       }
     }
 
-    function resetModelRootToOrigin() {
-      modelRoot.position.set(0, 0, 0);
-      modelRoot.quaternion.identity();
-      modelRoot.scale.set(1, 1, 1);
-      modelRoot.updateMatrixWorld(true);
+    function showARConfirmation(message = "AR FLOOR SET") {
+      arConfirm.textContent = message;
+      arConfirm.classList.add("show");
+      arConfirmTimer = 2.8;
     }
 
-    function setModelVisibleInAR(visible) {
-      if (!currentObject) return;
-      currentObject.visible = visible;
+    function updateFloorMarker(visible = true) {
+      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
+      floorMarker.position.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
     }
 
-    function placeModelAtReticle() {
-      if (!isPassthroughAR) {
-        setStatus("Enter <b>Passthrough</b> first, then look at the floor and place the model.", true);
-        return;
+    function applyXRFloorPlacement() {
+      updateGrid();
+
+      if (currentObject && renderer.xr.isPresenting) {
+        const box = new THREE.Box3().setFromObject(currentObject);
+        currentObject.position.y += xrFloorY - box.min.y;
+        currentObject.updateMatrixWorld(true);
+
+        const newBox = new THREE.Box3().setFromObject(currentObject);
+        modelInfo.box = newBox;
+        modelInfo.center = newBox.getCenter(new THREE.Vector3());
+        modelInfo.size = newBox.getSize(new THREE.Vector3());
+        modelInfo.maxDim = Math.max(modelInfo.size.x, modelInfo.size.y, modelInfo.size.z, 0.1);
       }
 
-      if (!currentObject) {
-        setStatus("Load the OBJ first, then enter passthrough and place it on the floor.", true);
-        return;
+      updateFloorMarker(true);
+    }
+
+    function autoDetectXRFloor() {
+      if (!renderer.xr.isPresenting || xrFloorManual || xrFloorAutoSet) return;
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      if (!Number.isFinite(xrCamPos.y)) return;
+
+      // If the Quest gives a real local-floor space, camera Y is usually around standing eye height.
+      // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
+      xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
+      xrFloorAutoSet = true;
+      applyXRFloorPlacement();
+    }
+
+    function getControllerObjectByHand(handedness, preferGrip = true) {
+      const pairs = [
+        { controller: controller1, grip: controllerGrip1 },
+        { controller: controller2, grip: controllerGrip2 }
+      ];
+
+      for (const pair of pairs) {
+        if (pair.controller.userData.handedness === handedness) {
+          return preferGrip ? pair.grip : pair.controller;
+        }
       }
 
-      if (!reticle.visible) {
+      return null;
+    }
+
+    function getAnyControllerObjectExcept(triggeringController) {
+      const candidates = [
+        { controller: controller1, grip: controllerGrip1 },
+        { controller: controller2, grip: controllerGrip2 }
+      ];
+
+      for (const pair of candidates) {
+        if (pair.controller !== triggeringController) {
+          return pair.grip || pair.controller;
+        }
+      }
+
+      return null;
+    }
+
+    function handleControllerTrigger(triggeringController) {
+      if (!renderer.xr.isPresenting) return;
+
+      const hand = triggeringController.userData.handedness || "unknown";
+
+      // Only right trigger confirms the floor. This avoids accidentally setting the floor
+      // when moving the left controller down.
+      if (hand !== "right" && hand !== "unknown") {
         setStatus(
-          "No floor hit found yet. Look down at the real floor and move your head slightly until the blue ring appears, then press trigger/A or Place on floor.",
-          true
+          `<span class="err">Use the right trigger to confirm floor calibration.</span>\n` +
+          `Put the left controller on the real floor, then press the right trigger.`
         );
         return;
       }
 
-      const pos = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
-      const scl = new THREE.Vector3();
-      reticle.matrix.decompose(pos, quat, scl);
+      calibrateXRFloorFromLeftController(triggeringController);
+    }
 
-      // Use the hit-test position for floor height/position, but keep the model upright.
-      // This prevents accidental wall-tilt and avoids any head-height offset.
-      modelRoot.position.copy(pos);
-      modelRoot.quaternion.identity();
-      modelRoot.scale.set(1, 1, 1);
-      modelRoot.updateMatrixWorld(true);
+    function calibrateXRFloorFromLeftController(triggeringController = null) {
+      if (!renderer.xr.isPresenting) return;
 
-      arModelPlaced = true;
-      setModelVisibleInAR(true);
-      reticle.visible = false;
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      let leftObject = getControllerObjectByHand("left", true);
+
+      // If the browser did not provide handedness yet, fall back to "the other controller"
+      // while still requiring the trigger to be pressed on the right/unknown controller.
+      if (!leftObject && triggeringController) {
+        leftObject = getAnyControllerObjectExcept(triggeringController);
+      }
+
+      if (!leftObject) {
+        setStatus(
+          `<span class="err">Could not find the left controller.</span>\n` +
+          `Make sure both Quest controllers are awake, put the left one on the floor, then press the right trigger.`
+        );
+        return;
+      }
+
+      leftObject.updateMatrixWorld(true);
+      controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
+
+      if (!Number.isFinite(controllerPos.y)) {
+        setStatus(
+          `<span class="err">Left controller position was not available.</span>\n` +
+          `Move both controllers slightly, put the left one on the floor, then press the right trigger again.`
+        );
+        return;
+      }
+
+      // Prevent accidental calibration from a left controller held in mid-air.
+      if (Number.isFinite(xrCamPos.y) && controllerPos.y > xrCamPos.y - 0.70) {
+        setStatus(
+          `<span class="err">Left controller was not low enough to set the floor.</span>\n` +
+          `Put the left controller flat on the real floor, then press the right trigger again.`
+        );
+        return;
+      }
+
+      xrFloorY = controllerPos.y;
+      xrFloorMarkerX = controllerPos.x;
+      xrFloorMarkerZ = controllerPos.z;
+      xrFloorManual = true;
+      xrFloorAutoSet = true;
+      applyXRFloorPlacement();
+      showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
 
       setStatus(
-        `<span class="ok">Model placed on AR floor.</span>\n` +
-        `The base of the model is now at the hit-tested floor point. Recentring the headset should not move it to head height.\n` +
-        `Look at the floor again and press trigger/A to reposition it.`
+        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor calibrated.</span>\n` +
+        `Left controller height is now the floor. The model base has been moved to that level.\n` +
+        `A green floor marker shows where the calibration was set.`
       );
     }
 
-    async function requestARHitTestSource(session) {
-      if (hitTestSourceRequested) return;
-      hitTestSourceRequested = true;
-
-      try {
-        const viewerSpace = await session.requestReferenceSpace("viewer");
-        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-      } catch (err) {
-        console.warn("AR hit-test was not available:", err);
-        setStatus(
-          `<span class="err">Passthrough started, but floor hit-testing was not available.</span>\n` +
-          `This browser/session did not provide WebXR hit-test. Try updating Quest Browser, then re-open the GitHub Pages link.`,
-          true
-        );
-      }
-    }
-
-    function updateARHitTest(frame) {
-      if (!isPassthroughAR || !frame || !hitTestSource || arModelPlaced) return;
-
-      const referenceSpace = renderer.xr.getReferenceSpace();
-      const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-      if (hitTestResults.length > 0) {
-        const hit = hitTestResults[0];
-        const pose = hit.getPose(referenceSpace);
-
-        if (pose) {
-          reticle.visible = true;
-          reticle.matrix.fromArray(pose.transform.matrix);
-        }
-      } else {
-        reticle.visible = false;
-      }
+    function nudgeXRFloor(delta) {
+      xrFloorY += delta;
+      xrFloorManual = true;
+      xrFloorAutoSet = true;
+      applyXRFloorPlacement();
+      showARConfirmation(isPassthroughAR ? "AR FLOOR ADJUSTED" : "VR FLOOR ADJUSTED");
+      setStatus(
+        `<span class="ok">XR floor adjusted.</span>\n` +
+        `Floor offset changed by ${(delta * 100).toFixed(0)} cm. The model bottom follows this calibrated floor.`
+      );
     }
 
     function handleXRMovement(dt) {
@@ -1058,69 +1229,77 @@
     });
 
     arHideFloorInput.addEventListener("change", updateGrid);
-    placeARBtn.addEventListener("click", placeModelAtReticle);
+    arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
+    floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
+    floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
 
     renderer.xr.addEventListener("sessionstart", () => {
       const session = renderer.xr.getSession();
 
       isPassthroughAR = !!session && session.environmentBlendMode !== "opaque";
+      xrFloorAutoSet = false;
+      xrFloorManual = false;
+      xrFloorY = 0;
+
+      // Avoid carrying the normal desktop/orbit camera offset into XR.
+      camera.position.set(0, 0, 0);
+      cameraRig.position.set(0, 0, 0);
 
       if (isPassthroughAR) {
         scene.background = null;
         previousFloorVisible = floor.visible;
         previousGridVisible = grid.visible;
-        arModelPlaced = false;
-        reticle.visible = false;
-        resetModelRootToOrigin();
 
         if (arHideFloorInput.checked) {
           floor.visible = false;
           grid.visible = false;
         }
 
-        reframeCurrentModel(false);
-        setModelVisibleInAR(false);
-
-        session.addEventListener("select", placeModelAtReticle);
-        requestARHitTestSource(session);
-
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
-          `Look down at the real floor until the blue ring appears, then press trigger/A or <b>Place on floor</b>.\n` +
-          `The model is not using head height in AR mode.`
+          `To calibrate the real floor: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
+          `A green marker and AR FLOOR SET message will confirm it worked.`
+        );
+      } else {
+        setStatus(
+          `<span class="ok">VR mode active.</span>\n` +
+          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.`
         );
       }
     });
 
     renderer.xr.addEventListener("sessionend", () => {
-      const session = renderer.xr.getSession();
-      if (session) {
-        session.removeEventListener("select", placeModelAtReticle);
-      }
-
-      if (hitTestSource) {
-        hitTestSource.cancel?.();
-        hitTestSource = null;
-      }
-      hitTestSourceRequested = false;
-      reticle.visible = false;
-      arModelPlaced = false;
-      setModelVisibleInAR(true);
-      resetModelRootToOrigin();
-
       if (isPassthroughAR) {
         scene.background = normalBackground;
         floor.visible = previousFloorVisible;
         grid.visible = previousGridVisible;
-        isPassthroughAR = false;
-        reframeCurrentModel(false);
-        updateGrid();
       }
+
+      isPassthroughAR = false;
+      xrFloorY = 0;
+      xrFloorAutoSet = false;
+      xrFloorManual = false;
+      floorMarker.visible = false;
+      arConfirm.classList.remove("show");
+      arConfirmTimer = 0;
+      reframeCurrentModel(true);
+      updateGrid();
     });
 
-    renderer.setAnimationLoop((time, frame) => {
+    renderer.setAnimationLoop(() => {
       const dt = Math.min(clock.getDelta(), 0.05);
-      updateARHitTest(frame);
+
+      if (renderer.xr.isPresenting) {
+        autoDetectXRFloor();
+      }
+
+      if (arConfirmTimer > 0) {
+        arConfirmTimer -= dt;
+        if (arConfirmTimer <= 0) {
+          arConfirm.classList.remove("show");
+        }
+      }
+
       handleXRMovement(dt);
 
       if (!renderer.xr.isPresenting) {
