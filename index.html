@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 3</title>
+  <title>Quest OBJ Viewer version 4</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 3</h1>
+        <h1>Quest OBJ Viewer version 4</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -460,7 +460,7 @@
       <div class="control">
         <div>
           <b>XR clipping cuts</b><br />
-          <span>When enabled, the OBJ is cut off below the calibrated floor and above the calibrated ceiling.</span>
+          <span>When enabled, the OBJ is cut off below the calibrated floor and above the calibrated ceiling. Press the left controller <b>X</b> button to toggle this in XR.</span>
         </div>
         <input id="clippingEnabledInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off.
       </div>
     </div>
   </div>
@@ -814,6 +814,7 @@
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
+    let leftXButtonWasPressed = false;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
@@ -1657,6 +1658,29 @@
       return b3 || b4;
     }
 
+    function isLeftXButtonPressed(gamepad) {
+      if (!gamepad || !gamepad.buttons) return false;
+
+      // In the WebXR standard gamepad mapping, the left controller X button is commonly button 4.
+      // This is deliberately only checked on the left controller input source.
+      return gamepad.buttons[4]?.pressed || false;
+    }
+
+    function toggleClippingCuts(showMessage = true) {
+      clippingEnabledInput.checked = !clippingEnabledInput.checked;
+      updateClippingPlanes();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
+
+      if (showMessage) {
+        showARConfirmation(clippingEnabledInput.checked ? "CUTTING ON" : "CUTTING OFF");
+        setStatus(
+          `<span class="ok">Cut-off clipping ${clippingEnabledInput.checked ? "enabled" : "disabled"}.</span>\n` +
+          `Press the left controller X button again to toggle it.`
+        );
+      }
+    }
+
     function handleXRMovement(dt) {
       if (!renderer.xr.isPresenting) return;
 
@@ -1676,6 +1700,7 @@
 
       const moveSpeed = 1.35; // metres per second
       let sawRightController = false;
+      let sawLeftController = false;
 
       for (const source of session.inputSources) {
         const gp = source.gamepad;
@@ -1684,6 +1709,14 @@
         const { x, y } = getThumbstickAxes(gp);
 
         if (source.handedness === "left") {
+          sawLeftController = true;
+
+          const xPressed = isLeftXButtonPressed(gp);
+          if (xPressed && !leftXButtonWasPressed) {
+            toggleClippingCuts(true);
+          }
+          leftXButtonWasPressed = xPressed;
+
           if (!moveInput.checked) continue;
 
           const moveX = applyDeadzone(x);
@@ -1718,6 +1751,10 @@
 
       if (!sawRightController) {
         rightStickWasPressed = false;
+      }
+
+      if (!sawLeftController) {
+        leftXButtonWasPressed = false;
       }
     }
 
@@ -1764,6 +1801,12 @@
     collapseBtn.addEventListener("click", () => {
       ui.classList.toggle("collapsed");
       collapseBtn.textContent = ui.classList.contains("collapsed") ? "Show" : "Hide";
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key && event.key.toLowerCase() === "x" && !event.repeat) {
+        toggleClippingCuts(true);
+      }
     });
 
     window.addEventListener("resize", () => {
@@ -1837,6 +1880,7 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
+      leftXButtonWasPressed = false;
       floorMarker.visible = false;
       ceilingMarker.visible = false;
       updateClippingPlanes();
