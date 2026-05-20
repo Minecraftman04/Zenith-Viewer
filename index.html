@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 2</title>
+  <title>Quest OBJ Viewer version 3</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 2</h1>
+        <h1>Quest OBJ Viewer version 3</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level.</span>
+          <span>Left thumbstick moves you around. Click the left stick to switch AR/VR. Right thumbstick left/right rolls the model, up/down moves model height, and right-stick click resets to floor.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -461,7 +461,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, left-stick click tries to switch AR/VR, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
       </div>
     </div>
   </div>
@@ -738,6 +738,8 @@
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
+    let leftStickWasPressed = false;
+    let pendingXRModeSwitch = null;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
@@ -1197,6 +1199,77 @@
       floorMarker.position.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
     }
 
+    function getXRSessionOptions(mode) {
+      if (mode === "immersive-ar") {
+        return {
+          optionalFeatures: ["local-floor", "bounded-floor", "dom-overlay"],
+          domOverlay: { root: document.body }
+        };
+      }
+
+      return {
+        optionalFeatures: ["local-floor", "bounded-floor"]
+      };
+    }
+
+    async function requestXRMode(mode) {
+      if (!navigator.xr) {
+        setStatus("WebXR is not available in this browser/page.");
+        return false;
+      }
+
+      try {
+        const supported = await navigator.xr.isSessionSupported(mode);
+        if (!supported) {
+          setStatus(`${mode === "immersive-ar" ? "Passthrough/AR" : "VR"} mode is not supported here.`);
+          return false;
+        }
+
+        const session = await navigator.xr.requestSession(mode, getXRSessionOptions(mode));
+        await renderer.xr.setSession(session);
+        return true;
+      } catch (err) {
+        console.warn("XR mode switch failed:", err);
+        setStatus(
+          `<span class="err">Could not automatically switch ${mode === "immersive-ar" ? "to passthrough/AR" : "to VR"}.</span>\n` +
+          `Quest Browser may require tapping the Enter VR / Enter Passthrough button manually.\n` +
+          `The rocket/model position has not been reset.`
+        );
+        return false;
+      }
+    }
+
+    async function switchBetweenARAndVR() {
+      if (!renderer.xr.isPresenting) return;
+
+      const currentSession = renderer.xr.getSession();
+      if (!currentSession) return;
+
+      pendingXRModeSwitch = isPassthroughAR ? "immersive-vr" : "immersive-ar";
+
+      showARConfirmation(isPassthroughAR ? "SWITCHING TO VR" : "SWITCHING TO AR");
+      setStatus(
+        `<span class="ok">Switching mode...</span>\n` +
+        `Trying to switch ${isPassthroughAR ? "from AR/passthrough to VR" : "from VR to AR/passthrough"} while keeping the rocket/model transform unchanged.`
+      );
+
+      try {
+        await currentSession.end();
+      } catch (err) {
+        console.warn("Could not end current XR session:", err);
+        pendingXRModeSwitch = null;
+      }
+    }
+
+    function isLeftStickPressed(gamepad) {
+      if (!gamepad || !gamepad.buttons) return false;
+
+      // Quest thumbstick click is commonly button 3/4 depending on browser mapping.
+      const b3 = gamepad.buttons[3]?.pressed || false;
+      const b4 = gamepad.buttons[4]?.pressed || false;
+      return b3 || b4;
+    }
+
     function applyXRFloorPlacement() {
       updateGrid();
 
@@ -1451,6 +1524,7 @@
       if (right.lengthSq() > 0) right.normalize();
 
       const moveSpeed = 1.35; // metres per second
+      let sawLeftController = false;
       let sawRightController = false;
 
       for (const source of session.inputSources) {
@@ -1460,18 +1534,27 @@
         const { x, y } = getThumbstickAxes(gp);
 
         if (source.handedness === "left") {
-          if (!moveInput.checked) continue;
+          sawLeftController = true;
 
-          const moveX = applyDeadzone(x);
-          const moveY = applyDeadzone(y);
+          if (moveInput.checked) {
+            const moveX = applyDeadzone(x);
+            const moveY = applyDeadzone(y);
 
-          if (moveY !== 0) {
-            cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
+            if (moveY !== 0) {
+              cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
+            }
+
+            if (moveX !== 0) {
+              cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
+            }
           }
 
-          if (moveX !== 0) {
-            cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
+          // Clicking the left thumbstick attempts to switch between VR and passthrough/AR.
+          const leftStickPressed = isLeftStickPressed(gp);
+          if (leftStickPressed && !leftStickWasPressed) {
+            switchBetweenARAndVR();
           }
+          leftStickWasPressed = leftStickPressed;
         }
 
         if (source.handedness === "right") {
@@ -1490,6 +1573,10 @@
           }
           rightStickWasPressed = stickPressed;
         }
+      }
+
+      if (!sawLeftController) {
+        leftStickWasPressed = false;
       }
 
       if (!sawRightController) {
@@ -1581,17 +1668,22 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To calibrate the real floor: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `A green marker and AR FLOOR SET message will confirm it worked.`
+          `A green marker and AR FLOOR SET message will confirm it worked.\n` +
+          `Click the left joystick to try switching between AR and VR.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.`
+          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
+          `Click the left joystick to try switching between VR and AR.`
         );
       }
     });
 
-    renderer.xr.addEventListener("sessionend", () => {
+    renderer.xr.addEventListener("sessionend", async () => {
+      const targetMode = pendingXRModeSwitch;
+      pendingXRModeSwitch = null;
+
       if (isPassthroughAR) {
         scene.background = normalBackground;
         floor.visible = previousFloorVisible;
@@ -1603,10 +1695,20 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
+      leftStickWasPressed = false;
       floorMarker.visible = false;
       updateControllerVisuals();
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
+
+      // Do not reframe/reset the rocket while switching modes. This keeps the model
+      // transform, rotations and height offset as unchanged as the browser allows.
+      if (targetMode) {
+        updateGrid();
+        await requestXRMode(targetMode);
+        return;
+      }
+
       reframeCurrentModel(true);
       updateGrid();
     });
