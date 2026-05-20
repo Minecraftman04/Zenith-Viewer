@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 19</title>
+  <title>Quest OBJ Viewer version 20</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 19</h1>
+        <h1>Quest OBJ Viewer version 20</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. Left controller Y briefly fades the fixed floor/ceiling markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -867,6 +867,16 @@
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
     const markerWorldScratch = new THREE.Vector3();
+
+    // Marker reveal behaviour: markers stay fixed in XR tracking space, but they
+    // are normally hidden. Press left-controller Y to fade any set markers in,
+    // briefly show them, then fade them back out.
+    const MARKER_FADE_IN_SECONDS = 0.28;
+    const MARKER_HOLD_SECONDS = 1.15;
+    const MARKER_FADE_OUT_SECONDS = 1.20;
+    const MARKER_REVEAL_TOTAL_SECONDS = MARKER_FADE_IN_SECONDS + MARKER_HOLD_SECONDS + MARKER_FADE_OUT_SECONDS;
+    let markerRevealTimer = 0;
+    let leftYButtonWasPressed = false;
 
     // Cut heights are separate from the OBJ transform. Moving the OBJ up/down changes
     // modelVerticalOffset only. It must not change these saved cuts or their markers.
@@ -1340,9 +1350,86 @@
       }
     }
 
+    function rememberMarkerBaseOpacity(group) {
+      group.traverse((child) => {
+        const mats = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+        for (const mat of mats) {
+          if (!mat) continue;
+          mat.transparent = true;
+          mat.userData.baseMarkerOpacity = Number.isFinite(mat.opacity) ? mat.opacity : 1;
+        }
+      });
+    }
+
+    rememberMarkerBaseOpacity(floorMarker);
+    rememberMarkerBaseOpacity(ceilingMarker);
+
+    function getMarkerRevealOpacity() {
+      if (markerRevealTimer <= 0) return 0;
+
+      const elapsed = MARKER_REVEAL_TOTAL_SECONDS - markerRevealTimer;
+
+      if (elapsed < MARKER_FADE_IN_SECONDS) {
+        return THREE.MathUtils.clamp(elapsed / MARKER_FADE_IN_SECONDS, 0, 1);
+      }
+
+      if (markerRevealTimer < MARKER_FADE_OUT_SECONDS) {
+        return THREE.MathUtils.clamp(markerRevealTimer / MARKER_FADE_OUT_SECONDS, 0, 1);
+      }
+
+      return 1;
+    }
+
+    function setMarkerOpacity(group, opacityScale) {
+      group.traverse((child) => {
+        const mats = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+        for (const mat of mats) {
+          if (!mat) continue;
+          const base = Number.isFinite(mat.userData.baseMarkerOpacity) ? mat.userData.baseMarkerOpacity : 1;
+          mat.opacity = base * opacityScale;
+          mat.needsUpdate = true;
+        }
+      });
+    }
+
+    function triggerMarkerReveal(showMessage = true) {
+      if (!renderer.xr.isPresenting) return;
+
+      if (!xrFloorManual && !xrCeilingManual) {
+        if (showMessage) {
+          showARConfirmation("NO MARKERS SET");
+          setStatus(
+            `<span class="err">No XR floor or ceiling marker has been set yet.</span>
+` +
+            `Set the floor or ceiling with the left controller and right trigger first, then press Y to reveal the markers.`
+          );
+        }
+        return;
+      }
+
+      markerRevealTimer = MARKER_REVEAL_TOTAL_SECONDS;
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
+
+      if (showMessage) {
+        showARConfirmation("MARKERS SHOWN");
+      }
+    }
+
+    function updateMarkerReveal(dt) {
+      if (markerRevealTimer > 0) {
+        markerRevealTimer = Math.max(0, markerRevealTimer - dt);
+      }
+
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
+    }
+
     function updateCeilingMarker(visible = true) {
-      ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
+      const opacity = getMarkerRevealOpacity();
+      ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual && opacity > 0.001;
       ceilingMarker.position.copy(ceilingMarkerWorldPosition);
+      setMarkerOpacity(ceilingMarker, opacity);
       ceilingMarker.updateMatrixWorld(true);
     }
 
@@ -1353,8 +1440,10 @@
     }
 
     function updateFloorMarker(visible = true) {
-      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
+      const opacity = getMarkerRevealOpacity();
+      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual && opacity > 0.001;
       floorMarker.position.copy(floorMarkerWorldPosition);
+      setMarkerOpacity(floorMarker, opacity);
       floorMarker.updateMatrixWorld(true);
     }
 
@@ -1537,12 +1626,13 @@
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
+      triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
 
       setStatus(
         `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor clipping set.</span>\n` +
         `Left controller height is now the floor. The model base is on that level and the OBJ is cut off below it.\n` +
-        `Green marker = floor cut. Red marker = ceiling cut.`
+        `Green marker = floor cut. Red marker = ceiling cut. Press left Y to reveal markers again.`
       );
     }
 
@@ -1583,7 +1673,7 @@
       clippingEnabledInput.checked = true;
 
       updateClippingPlanes();
-      updateCeilingMarker(true);
+      triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR CEILING CUT SET" : "VR CEILING CUT SET");
 
       setStatus(
@@ -1600,7 +1690,7 @@
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
       updateClippingPlanes();
-      updateCeilingMarker(true);
+      triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR CEILING ADJUSTED" : "VR CEILING ADJUSTED");
       setStatus(
         `<span class="ok">XR ceiling cut adjusted.</span>\n` +
@@ -1615,6 +1705,7 @@
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
+      triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR FLOOR ADJUSTED" : "VR FLOOR ADJUSTED");
       setStatus(
         `<span class="ok">XR floor cut adjusted.</span>\n` +
@@ -1724,6 +1815,13 @@
       return gamepad.buttons[4]?.pressed || false;
     }
 
+    function isLeftYButtonPressed(gamepad) {
+      if (!gamepad || !gamepad.buttons) return false;
+
+      // On Quest Touch controllers, Y is normally exposed as button 5 on the left controller.
+      return gamepad.buttons[5]?.pressed || false;
+    }
+
     function toggleClippingCuts(showMessage = true) {
       if (!isClippingReady()) {
         clippingEnabledInput.checked = false;
@@ -1791,6 +1889,12 @@
           }
           leftXButtonWasPressed = xPressed;
 
+          const yPressed = isLeftYButtonPressed(gp);
+          if (yPressed && !leftYButtonWasPressed) {
+            triggerMarkerReveal(true);
+          }
+          leftYButtonWasPressed = yPressed;
+
           if (!moveInput.checked) continue;
 
           const moveX = applyDeadzone(x);
@@ -1829,6 +1933,7 @@
 
       if (!sawLeftController) {
         leftXButtonWasPressed = false;
+        leftYButtonWasPressed = false;
       }
     }
 
@@ -1878,8 +1983,16 @@
     });
 
     window.addEventListener("keydown", (event) => {
-      if (event.key && event.key.toLowerCase() === "x" && !event.repeat) {
+      if (!event.key || event.repeat) return;
+
+      const key = event.key.toLowerCase();
+
+      if (key === "x") {
         toggleClippingCuts(true);
+      }
+
+      if (key === "y") {
+        triggerMarkerReveal(true);
       }
     });
 
@@ -1938,13 +2051,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. Moving the OBJ should not move them.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
         );
       }
     });
@@ -1973,6 +2086,10 @@
       xrFloorManual = false;
       rightStickWasPressed = false;
       leftXButtonWasPressed = false;
+      leftYButtonWasPressed = false;
+      markerRevealTimer = 0;
+      setMarkerOpacity(floorMarker, 0);
+      setMarkerOpacity(ceilingMarker, 0);
       floorMarker.visible = false;
       ceilingMarker.visible = false;
       updateClippingPlanes();
@@ -1989,6 +2106,9 @@
       if (renderer.xr.isPresenting) {
         autoDetectXRFloor();
         updateControllerVisuals();
+        updateMarkerReveal(dt);
+      } else {
+        markerRevealTimer = 0;
       }
 
       if (arConfirmTimer > 0) {
