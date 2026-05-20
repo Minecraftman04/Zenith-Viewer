@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Click the left stick to switch AR/VR. Right thumbstick left/right rolls the model, up/down moves model height, and right-stick click resets to floor.</span>
+          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -457,11 +457,42 @@
         </div>
       </div>
 
+      <div class="control">
+        <div>
+          <b>XR clipping cuts</b><br />
+          <span>When enabled, the OBJ is cut off below the calibrated floor and above the calibrated ceiling.</span>
+        </div>
+        <input id="clippingEnabledInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Right trigger clipping mode</b><br />
+          <span>Use Auto normally. Put the left controller on the floor or at the ceiling height, then press the right trigger.</span>
+        </div>
+        <select id="clipSetModeInput">
+          <option value="auto" selected>Auto floor/ceiling</option>
+          <option value="floor">Set floor cut</option>
+          <option value="ceiling">Set ceiling cut</option>
+        </select>
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Ceiling cut adjustment</b><br />
+          <span>Fine-tune the ceiling clipping plane if the controller point is slightly off.</span>
+        </div>
+        <div class="row" style="justify-content:flex-end;margin:0;">
+          <button id="ceilingUpBtn" class="small" type="button">Ceiling +10 cm</button>
+          <button id="ceilingDownBtn" class="small" type="button">Ceiling −10 cm</button>
+        </div>
+      </div>
+
       <div id="status">Select <b>Zenith 1.obj</b> first, then use <b>Add MTL / Textures</b> to apply the material file separately.</div>
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, left-stick click tries to switch AR/VR, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts.
       </div>
     </div>
   </div>
@@ -492,6 +523,10 @@
     const arFloorInput = document.getElementById("arFloorInput");
     const floorUpBtn = document.getElementById("floorUpBtn");
     const floorDownBtn = document.getElementById("floorDownBtn");
+    const clippingEnabledInput = document.getElementById("clippingEnabledInput");
+    const clipSetModeInput = document.getElementById("clipSetModeInput");
+    const ceilingUpBtn = document.getElementById("ceilingUpBtn");
+    const ceilingDownBtn = document.getElementById("ceilingDownBtn");
     const resetBtn = document.getElementById("resetBtn");
     const collapseBtn = document.getElementById("collapseBtn");
     const resetRotationBtn = document.getElementById("resetRotationBtn");
@@ -508,6 +543,7 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
+    renderer.localClippingEnabled = true;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -719,6 +755,46 @@
     floorStem.position.y = 0.225;
     floorMarker.add(floorStem);
 
+    const ceilingMarker = new THREE.Group();
+    ceilingMarker.visible = false;
+    scene.add(ceilingMarker);
+
+    const ceilingRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.10, 0.16, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0xff8b8b,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.92
+      })
+    );
+    ceilingRing.rotation.x = -Math.PI / 2;
+    ceilingMarker.add(ceilingRing);
+
+    const ceilingPlaneVisual = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.34, 0.34),
+      new THREE.MeshBasicMaterial({
+        color: 0xff8b8b,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.16
+      })
+    );
+    ceilingPlaneVisual.rotation.x = -Math.PI / 2;
+    ceilingPlaneVisual.position.y = 0.003;
+    ceilingMarker.add(ceilingPlaneVisual);
+
+    const ceilingStem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.45, 16),
+      new THREE.MeshBasicMaterial({
+        color: 0xff8b8b,
+        transparent: true,
+        opacity: 0.70
+      })
+    );
+    ceilingStem.position.y = -0.225;
+    ceilingMarker.add(ceilingStem);
+
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
 
@@ -738,8 +814,6 @@
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
-    let leftStickWasPressed = false;
-    let pendingXRModeSwitch = null;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
@@ -774,7 +848,15 @@
     let xrFloorManual = false;
     let xrFloorMarkerX = 0;
     let xrFloorMarkerZ = 0;
+    let xrCeilingY = 2.2;
+    let xrCeilingManual = false;
+    let xrCeilingMarkerX = 0;
+    let xrCeilingMarkerZ = 0;
     let arConfirmTimer = 0;
+
+    const floorClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const ceilingClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.2);
+    const activeClipPlanes = [floorClipPlane, ceilingClipPlane];
 
     function setStatus(html, isError = false) {
       statusEl.innerHTML = html;
@@ -1017,6 +1099,7 @@
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
+        `XR clipping: ${clippingEnabledInput.checked ? "on" : "off"} | Floor ${xrFloorY.toFixed(2)} m | Ceiling ${xrCeilingY.toFixed(2)} m\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -1139,6 +1222,7 @@
         currentObject = object;
         modelRoot.add(currentObject);
         frameObject(currentObject, resetCamera);
+        updateClippingPlanes();
       } catch (err) {
         console.error(err);
         setStatus("Could not load the OBJ/materials.\n" + escapeHTML(err.message || err), true);
@@ -1188,6 +1272,36 @@
       }
     }
 
+    function updateClippingPlanes() {
+      floorClipPlane.normal.set(0, 1, 0);
+      floorClipPlane.constant = -xrFloorY;
+
+      ceilingClipPlane.normal.set(0, -1, 0);
+      ceilingClipPlane.constant = xrCeilingY;
+
+      const clippingActive = clippingEnabledInput.checked && renderer.xr.isPresenting;
+      const planes = clippingActive ? activeClipPlanes : [];
+
+      if (currentObject) {
+        currentObject.traverse((child) => {
+          if (!child.isMesh) return;
+
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          for (const mat of mats) {
+            if (!mat) continue;
+            mat.clippingPlanes = planes;
+            mat.clipShadows = true;
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    }
+
+    function updateCeilingMarker(visible = true) {
+      ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual && clippingEnabledInput.checked;
+      ceilingMarker.position.set(xrCeilingMarkerX, xrCeilingY - 0.006, xrCeilingMarkerZ);
+    }
+
     function showARConfirmation(message = "AR FLOOR SET") {
       arConfirm.textContent = message;
       arConfirm.classList.add("show");
@@ -1195,79 +1309,8 @@
     }
 
     function updateFloorMarker(visible = true) {
-      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
+      floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual && clippingEnabledInput.checked;
       floorMarker.position.set(xrFloorMarkerX, xrFloorY + 0.006, xrFloorMarkerZ);
-    }
-
-    function getXRSessionOptions(mode) {
-      if (mode === "immersive-ar") {
-        return {
-          optionalFeatures: ["local-floor", "bounded-floor", "dom-overlay"],
-          domOverlay: { root: document.body }
-        };
-      }
-
-      return {
-        optionalFeatures: ["local-floor", "bounded-floor"]
-      };
-    }
-
-    async function requestXRMode(mode) {
-      if (!navigator.xr) {
-        setStatus("WebXR is not available in this browser/page.");
-        return false;
-      }
-
-      try {
-        const supported = await navigator.xr.isSessionSupported(mode);
-        if (!supported) {
-          setStatus(`${mode === "immersive-ar" ? "Passthrough/AR" : "VR"} mode is not supported here.`);
-          return false;
-        }
-
-        const session = await navigator.xr.requestSession(mode, getXRSessionOptions(mode));
-        await renderer.xr.setSession(session);
-        return true;
-      } catch (err) {
-        console.warn("XR mode switch failed:", err);
-        setStatus(
-          `<span class="err">Could not automatically switch ${mode === "immersive-ar" ? "to passthrough/AR" : "to VR"}.</span>\n` +
-          `Quest Browser may require tapping the Enter VR / Enter Passthrough button manually.\n` +
-          `The rocket/model position has not been reset.`
-        );
-        return false;
-      }
-    }
-
-    async function switchBetweenARAndVR() {
-      if (!renderer.xr.isPresenting) return;
-
-      const currentSession = renderer.xr.getSession();
-      if (!currentSession) return;
-
-      pendingXRModeSwitch = isPassthroughAR ? "immersive-vr" : "immersive-ar";
-
-      showARConfirmation(isPassthroughAR ? "SWITCHING TO VR" : "SWITCHING TO AR");
-      setStatus(
-        `<span class="ok">Switching mode...</span>\n` +
-        `Trying to switch ${isPassthroughAR ? "from AR/passthrough to VR" : "from VR to AR/passthrough"} while keeping the rocket/model transform unchanged.`
-      );
-
-      try {
-        await currentSession.end();
-      } catch (err) {
-        console.warn("Could not end current XR session:", err);
-        pendingXRModeSwitch = null;
-      }
-    }
-
-    function isLeftStickPressed(gamepad) {
-      if (!gamepad || !gamepad.buttons) return false;
-
-      // Quest thumbstick click is commonly button 3/4 depending on browser mapping.
-      const b3 = gamepad.buttons[3]?.pressed || false;
-      const b4 = gamepad.buttons[4]?.pressed || false;
-      return b3 || b4;
     }
 
     function applyXRFloorPlacement() {
@@ -1277,7 +1320,9 @@
         applyModelTransform(currentObject);
       }
 
+      updateClippingPlanes();
       updateFloorMarker(true);
+      updateCeilingMarker(true);
     }
 
     function autoDetectXRFloor() {
@@ -1291,6 +1336,11 @@
       // If the Quest gives a real local-floor space, camera Y is usually around standing eye height.
       // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
       xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
+
+      if (!xrCeilingManual) {
+        xrCeilingY = xrFloorY + 2.2;
+      }
+
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
     }
@@ -1330,17 +1380,62 @@
 
       const hand = triggeringController.userData.handedness || "unknown";
 
-      // Only right trigger confirms the floor. This avoids accidentally setting the floor
-      // when moving the left controller down.
+      // Only right trigger confirms floor/ceiling clipping. This avoids accidentally setting
+      // the cut when moving the left controller.
       if (hand !== "right" && hand !== "unknown") {
         setStatus(
-          `<span class="err">Use the right trigger to confirm floor calibration.</span>\n` +
-          `Put the left controller on the real floor, then press the right trigger.`
+          `<span class="err">Use the right trigger to confirm the cut height.</span>\n` +
+          `Move the left controller to the floor or ceiling/cut height, then press the right trigger.`
         );
         return;
       }
 
-      calibrateXRFloorFromLeftController(triggeringController);
+      const mode = clipSetModeInput.value;
+
+      if (mode === "floor") {
+        calibrateXRFloorFromLeftController(triggeringController);
+        return;
+      }
+
+      if (mode === "ceiling") {
+        calibrateXRCeilingFromLeftController(triggeringController);
+        return;
+      }
+
+      // Auto mode: if the left controller is clearly low, set the floor. Otherwise set the ceiling.
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      let leftObject = getControllerObjectByHand("left", true);
+
+      if (!leftObject && triggeringController) {
+        leftObject = getAnyControllerObjectExcept(triggeringController);
+      }
+
+      if (!leftObject) {
+        setStatus(
+          `<span class="err">Could not find the left controller.</span>\n` +
+          `Put/hold the left controller at the floor or ceiling cut height, then press the right trigger.`
+        );
+        return;
+      }
+
+      leftObject.updateMatrixWorld(true);
+      controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
+
+      if (!Number.isFinite(controllerPos.y)) {
+        setStatus(
+          `<span class="err">Left controller position was not available.</span>\n` +
+          `Move both controllers slightly, then press the right trigger again.`
+        );
+        return;
+      }
+
+      if (Number.isFinite(xrCamPos.y) && controllerPos.y < xrCamPos.y - 0.70) {
+        calibrateXRFloorFromLeftController(triggeringController);
+      } else {
+        calibrateXRCeilingFromLeftController(triggeringController);
+      }
     }
 
     function calibrateXRFloorFromLeftController(triggeringController = null) {
@@ -1394,9 +1489,65 @@
       showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
 
       setStatus(
-        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor calibrated.</span>\n` +
-        `Left controller height is now the floor. The model base has been moved to that level.\n` +
-        `A green floor marker shows where the calibration was set.`
+        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor clipping set.</span>\n` +
+        `Left controller height is now the floor. The model base is on that level and the OBJ is cut off below it.\n` +
+        `Green marker = floor cut. Red marker = ceiling cut.`
+      );
+    }
+
+    function calibrateXRCeilingFromLeftController(triggeringController = null) {
+      if (!renderer.xr.isPresenting) return;
+
+      let leftObject = getControllerObjectByHand("left", true);
+
+      if (!leftObject && triggeringController) {
+        leftObject = getAnyControllerObjectExcept(triggeringController);
+      }
+
+      if (!leftObject) {
+        setStatus(
+          `<span class="err">Could not find the left controller.</span>\n` +
+          `Hold the left controller at the ceiling/cut height, then press the right trigger.`
+        );
+        return;
+      }
+
+      leftObject.updateMatrixWorld(true);
+      controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
+
+      if (!Number.isFinite(controllerPos.y)) {
+        setStatus(
+          `<span class="err">Left controller position was not available.</span>\n` +
+          `Move both controllers slightly, hold the left one at the cut height, then press the right trigger again.`
+        );
+        return;
+      }
+
+      xrCeilingY = controllerPos.y;
+      xrCeilingMarkerX = controllerPos.x;
+      xrCeilingMarkerZ = controllerPos.z;
+      xrCeilingManual = true;
+
+      updateClippingPlanes();
+      updateCeilingMarker(true);
+      showARConfirmation(isPassthroughAR ? "AR CEILING CUT SET" : "VR CEILING CUT SET");
+
+      setStatus(
+        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} ceiling clipping set.</span>\n` +
+        `The OBJ is now cut off above the left controller height.\n` +
+        `Red marker = ceiling cut. Green marker = floor cut.`
+      );
+    }
+
+    function nudgeXRCeiling(delta) {
+      xrCeilingY += delta;
+      xrCeilingManual = true;
+      updateClippingPlanes();
+      updateCeilingMarker(true);
+      showARConfirmation(isPassthroughAR ? "AR CEILING ADJUSTED" : "VR CEILING ADJUSTED");
+      setStatus(
+        `<span class="ok">XR ceiling cut adjusted.</span>\n` +
+        `Ceiling clipping plane changed by ${(delta * 100).toFixed(0)} cm.`
       );
     }
 
@@ -1407,8 +1558,8 @@
       applyXRFloorPlacement();
       showARConfirmation(isPassthroughAR ? "AR FLOOR ADJUSTED" : "VR FLOOR ADJUSTED");
       setStatus(
-        `<span class="ok">XR floor adjusted.</span>\n` +
-        `Floor offset changed by ${(delta * 100).toFixed(0)} cm. The model bottom follows this calibrated floor.`
+        `<span class="ok">XR floor cut adjusted.</span>\n` +
+        `Floor clipping plane changed by ${(delta * 100).toFixed(0)} cm. The model bottom follows this calibrated floor.`
       );
     }
 
@@ -1524,7 +1675,6 @@
       if (right.lengthSq() > 0) right.normalize();
 
       const moveSpeed = 1.35; // metres per second
-      let sawLeftController = false;
       let sawRightController = false;
 
       for (const source of session.inputSources) {
@@ -1534,27 +1684,18 @@
         const { x, y } = getThumbstickAxes(gp);
 
         if (source.handedness === "left") {
-          sawLeftController = true;
+          if (!moveInput.checked) continue;
 
-          if (moveInput.checked) {
-            const moveX = applyDeadzone(x);
-            const moveY = applyDeadzone(y);
+          const moveX = applyDeadzone(x);
+          const moveY = applyDeadzone(y);
 
-            if (moveY !== 0) {
-              cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
-            }
-
-            if (moveX !== 0) {
-              cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
-            }
+          if (moveY !== 0) {
+            cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
           }
 
-          // Clicking the left thumbstick attempts to switch between VR and passthrough/AR.
-          const leftStickPressed = isLeftStickPressed(gp);
-          if (leftStickPressed && !leftStickWasPressed) {
-            switchBetweenARAndVR();
+          if (moveX !== 0) {
+            cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
           }
-          leftStickWasPressed = leftStickPressed;
         }
 
         if (source.handedness === "right") {
@@ -1573,10 +1714,6 @@
           }
           rightStickWasPressed = stickPressed;
         }
-      }
-
-      if (!sawLeftController) {
-        leftStickWasPressed = false;
       }
 
       if (!sawRightController) {
@@ -1641,6 +1778,13 @@
     arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
     floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
     floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
+    ceilingUpBtn.addEventListener("click", () => nudgeXRCeiling(0.10));
+    ceilingDownBtn.addEventListener("click", () => nudgeXRCeiling(-0.10));
+    clippingEnabledInput.addEventListener("change", () => {
+      updateClippingPlanes();
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
+    });
 
     renderer.xr.addEventListener("sessionstart", () => {
       const session = renderer.xr.getSession();
@@ -1667,23 +1811,19 @@
 
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
-          `To calibrate the real floor: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `A green marker and AR FLOOR SET message will confirm it worked.\n` +
-          `Click the left joystick to try switching between AR and VR.`
+          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
+          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `If the virtual floor appears wrong: put the <b>left controller</b> on the floor, then press the <b>right trigger</b>.\n` +
-          `Click the left joystick to try switching between VR and AR.`
+          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
+          `Green marker = floor cut. Red marker = ceiling cut. The OBJ is clipped between them.`
         );
       }
     });
 
-    renderer.xr.addEventListener("sessionend", async () => {
-      const targetMode = pendingXRModeSwitch;
-      pendingXRModeSwitch = null;
-
+    renderer.xr.addEventListener("sessionend", () => {
       if (isPassthroughAR) {
         scene.background = normalBackground;
         floor.visible = previousFloorVisible;
@@ -1692,23 +1832,17 @@
 
       isPassthroughAR = false;
       xrFloorY = 0;
+      xrCeilingY = 2.2;
+      xrCeilingManual = false;
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
-      leftStickWasPressed = false;
       floorMarker.visible = false;
+      ceilingMarker.visible = false;
+      updateClippingPlanes();
       updateControllerVisuals();
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
-
-      // Do not reframe/reset the rocket while switching modes. This keeps the model
-      // transform, rotations and height offset as unchanged as the browser allows.
-      if (targetMode) {
-        updateGrid();
-        await requestXRMode(targetMode);
-        return;
-      }
-
       reframeCurrentModel(true);
       updateGrid();
     });
