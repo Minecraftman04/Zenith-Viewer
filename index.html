@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 12</title>
+  <title>Quest OBJ Viewer version 13</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 12</h1>
+        <h1>Quest OBJ Viewer version 13</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays and a smaller bright left-controller panel. The panel renders in front of the OBJ and uses larger invisible hit areas for easier clicking.</span>
+          <span>Shows controller models/rays and a high-contrast opaque left-controller panel. Press left Y to show/hide it.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -708,57 +708,48 @@
       canvas.height = opts.height || 220;
       const ctx = canvas.getContext("2d");
 
-      const bgTop = opts.bgTop || "#1b2638";
-      const bgBottom = opts.bgBottom || "#111722";
-      const fg = opts.fg || "#f4f7fb";
-      const sub = opts.sub || "#b7c0d1";
-      const stroke = opts.stroke || "rgba(124,199,255,0.35)";
-      const accent = opts.accent || "rgba(124,199,255,0.75)";
+      // Opaque rectangular UI textures: no alpha/transparent corners, no gradients.
+      // This avoids the "filter/overlay" look in Quest passthrough.
+      const bg = opts.bg || "#f2f7ff";
+      const fg = opts.fg || "#06111f";
+      const sub = opts.sub || "#24364d";
+      const stroke = opts.stroke || "#06111f";
+      const accent = opts.accent || "#0066cc";
       const fontSize = opts.fontSize || 42;
-      const radius = opts.radius || 36;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Solid fill instead of gradients: this stops the UI from appearing to change
-      // shade/colour as the controller moves and texture sampling changes.
-      ctx.fillStyle = bgBottom;
-      roundRect(ctx, 10, 10, canvas.width - 20, canvas.height - 20, radius);
-      ctx.fill();
-
+      ctx.lineWidth = opts.borderWidth || 10;
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = 4;
-      ctx.stroke();
+      ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, canvas.width - ctx.lineWidth, canvas.height - ctx.lineWidth);
 
       if (opts.accentBar !== false) {
         ctx.fillStyle = accent;
-        roundRect(ctx, 30, 24, 9, canvas.height - 48, 5);
-        ctx.fill();
+        ctx.fillRect(18, 18, 18, canvas.height - 36);
       }
 
       ctx.fillStyle = fg;
-      ctx.font = `800 ${fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`;
+      ctx.font = `900 ${fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
       const lines = String(text).split("\n");
-      const lineHeight = fontSize * 1.08;
+      const lineHeight = fontSize * 1.05;
       const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2;
 
       lines.forEach((line, i) => {
-        const isSmall = line.startsWith("·") || line.length > 14;
+        const isSmall = line.startsWith("·") || line.length > 13;
         ctx.fillStyle = isSmall ? sub : fg;
-        ctx.font = `${isSmall ? 700 : 800} ${isSmall ? Math.max(26, fontSize * 0.68) : fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`;
+        ctx.font = `${isSmall ? 800 : 900} ${isSmall ? Math.max(26, fontSize * 0.66) : fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`;
         ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
       });
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-
-      // Avoid text changing shade/sharpness as the controller panel moves.
-      // Mipmap level switching on small moving UI panels can look like flicker/shimmer in XR.
       texture.generateMipmaps = false;
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.magFilter = THREE.NearestFilter;
       texture.wrapS = THREE.ClampToEdgeWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
       texture.anisotropy = 1;
@@ -787,40 +778,44 @@
     leftControllerUIPanel.visible = false;
 
     // Tuned to sit above/forward from the left controller, like a small wrist tablet.
-    leftControllerUIPanel.position.set(0.018, 0.070, -0.105);
-    leftControllerUIPanel.rotation.set(-0.68, 0.05, 0.02);
-    leftControllerUIPanel.scale.setScalar(0.42);
+    leftControllerUIPanel.position.set(0.018, 0.065, -0.105);
+    leftControllerUIPanel.rotation.set(-0.62, 0.04, 0.02);
+    leftControllerUIPanel.scale.setScalar(0.36);
 
     const panelBackMaterial = new THREE.MeshBasicMaterial({
-      color: 0x6f8fba,
-      transparent: true,
-      opacity: 0.86,
+      color: 0xf2f7ff,
+      transparent: false,
+      opacity: 1.0,
       side: THREE.DoubleSide,
-      depthTest: false
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false
     });
 
     const leftPanelShadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.43, 0.325),
+      new THREE.PlaneGeometry(0.40, 0.30),
       new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true,
-        opacity: 0.16,
+        opacity: 0.08,
         side: THREE.DoubleSide,
-        depthTest: false
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false
       })
     );
-    leftPanelShadow.position.set(0.010, -0.010, -0.010);
+    leftPanelShadow.position.set(0.006, -0.006, -0.010);
     leftControllerUIPanel.add(leftPanelShadow);
 
     const leftPanelBackground = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.41, 0.305),
+      new THREE.PlaneGeometry(0.385, 0.285),
       panelBackMaterial
     );
     leftPanelBackground.position.z = -0.006;
     leftControllerUIPanel.add(leftPanelBackground);
 
     const leftPanelBorder = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.415, 0.31)),
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.39, 0.29)),
       new THREE.LineBasicMaterial({
         color: 0xb7dfff,
         transparent: true,
@@ -832,17 +827,17 @@
     leftControllerUIPanel.add(leftPanelBorder);
 
     const leftPanelTitle = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.370, 0.045),
+      new THREE.PlaneGeometry(0.35, 0.040),
       new THREE.MeshBasicMaterial({
-        map: createLabelTexture("OBJ VIEWER\n· LEFT UI", {
+        map: createLabelTexture("OBJ VIEWER
+· LEFT UI", {
           width: 768,
           height: 180,
-          bgTop: "#7fa4d5",
-          bgBottom: "#527ba8",
-          fg: "#ffffff",
-          sub: "#b7dfff",
-          stroke: "rgba(124,199,255,0.75)",
-          accent: "rgba(150,240,177,0.95)",
+          bg: "#ffffff",
+          fg: "#06111f",
+          sub: "#06111f",
+          stroke: "#06111f",
+          accent: "#0066cc",
           fontSize: 35
         }),
         transparent: false,
@@ -852,14 +847,14 @@
         toneMapped: false
       })
     );
-    leftPanelTitle.position.set(0, 0.124, 0.006);
+    leftPanelTitle.position.set(0, 0.112, 0.006);
     leftControllerUIPanel.add(leftPanelTitle);
 
     const leftUIButtons = [];
     let leftUIHoveredButton = null;
     let leftUILastStateKey = "";
 
-    function makeLeftUIButton(id, label, x, y, w = 0.22, h = 0.078, color = 0x243244, accent = "rgba(124,199,255,0.85)") {
+    function makeLeftUIButton(id, label, x, y, w = 0.15, h = 0.048, color = 0xffffff, accent = "#0066cc")") {
       const button = new THREE.Group();
       button.name = `ui_button_${id}`;
       button.position.set(x, y, 0.012);
@@ -894,13 +889,13 @@
           map: createLabelTexture(label, {
             width: 640,
             height: 190,
-            bgTop: "#7fa4d5",
-            bgBottom: "#5f86b5",
-            fg: "#f4f7fb",
-            sub: "#b7c0d1",
-            stroke: "rgba(255,255,255,0.22)",
+            bg: "#ffffff",
+            fg: "#06111f",
+            sub: "#06111f",
+            stroke: accent,
             accent,
-            fontSize: 39
+            fontSize: 39,
+            borderWidth: 12
           }),
           color: 0xffffff,
           transparent: false,
@@ -920,11 +915,11 @@
 
       // Larger invisible hit target. The visible UI can be small while remaining easy to click.
       const hitBox = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 1.55, h * 1.70),
+        new THREE.PlaneGeometry(w * 2.25, h * 2.35),
         new THREE.MeshBasicMaterial({
           color: 0xffffff,
           transparent: true,
-          opacity: 0.001,
+          opacity: 0.0,
           side: THREE.DoubleSide,
           depthTest: false,
           depthWrite: false,
@@ -942,16 +937,17 @@
       return button;
     }
 
-    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON", -0.088, 0.048, 0.160, 0.052, 0x6fb7e8, "rgba(124,199,255,0.95)");
-    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.088, 0.048, 0.160, 0.052, 0x87a1c7, "rgba(124,199,255,0.95)");
-    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.088, -0.020, 0.160, 0.052, 0x7fd99c, "rgba(150,240,177,0.95)");
-    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.088, -0.020, 0.160, 0.052, 0xea737d, "rgba(255,139,139,0.95)");
-    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET", 0, -0.087, 0.336, 0.052, 0xa898e6, "rgba(205,180,255,0.95)");
+    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT
+WAIT", -0.082, 0.044, 0.150, 0.048, 0xffffff, "#0066cc");
+    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.082, 0.044, 0.150, 0.048, 0xffffff, "#444444");
+    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.082, -0.018, 0.150, 0.048, 0xffffff, "#008a3d");
+    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.082, -0.018, 0.150, 0.048, 0xffffff, "#cc1f2f");
+    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET", 0, -0.080, 0.314, 0.048, 0xffffff, "#6a40bf");
 
     const leftUIHoverIndicator = new THREE.Mesh(
-      new THREE.RingGeometry(0.007, 0.011, 32),
+      new THREE.CircleGeometry(0.010, 32),
       new THREE.MeshBasicMaterial({
-        color: 0xffd27c,
+        color: 0x000000,
         transparent: false,
         opacity: 1.0,
         side: THREE.DoubleSide,
@@ -966,19 +962,19 @@
     leftControllerUIPanel.add(leftUIHoverIndicator);
 
     const leftUIStatus = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.336, 0.030),
+      new THREE.PlaneGeometry(0.314, 0.026),
       new THREE.MeshBasicMaterial({
         map: createLabelTexture("Y hides/shows UI", {
           width: 768,
           height: 120,
-          bgTop: "#121a28",
-          bgBottom: "#0f1520",
-          fg: "#d7deea",
-          sub: "#d7deea",
-          stroke: "rgba(255,255,255,0.12)",
-          accent: "rgba(124,199,255,0.55)",
+          bg: "#06111f",
+          fg: "#ffffff",
+          sub: "#ffffff",
+          stroke: "#ffffff",
+          accent: "#ffffff",
           fontSize: 29,
-          accentBar: false
+          accentBar: false,
+          borderWidth: 6
         }),
         transparent: false,
         side: THREE.DoubleSide,
@@ -988,7 +984,7 @@
         opacity: 1.0
       })
     );
-    leftUIStatus.position.set(0, -0.129, 0.010);
+    leftUIStatus.position.set(0, -0.116, 0.010);
     leftControllerUIPanel.add(leftUIStatus);
 
     function getLeftControllerGrip() {
@@ -1026,11 +1022,14 @@
       if (!force && key === leftUILastStateKey) return;
       leftUILastStateKey = key;
 
-      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x6fb7e8, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x87a1c7, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x7fd99c, "rgba(150,240,177,0.95)");
-      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0xea737d, "rgba(255,139,139,0.95)");
-      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET HEIGHT" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0xa898e6, "rgba(205,180,255,0.95)");
+      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT
+WAIT" : (clippingEnabledInput.checked ? "CUT
+ON" : "CUT
+OFF"), 0xffffff, "#0066cc");
+      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0xffffff, "#444444");
+      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0xffffff, "#008a3d");
+      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0xffffff, "#cc1f2f");
+      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0xffffff, "#6a40bf");
     }
 
     function updateButtonLabel(button, label, color, accent = "rgba(124,199,255,0.85)") {
@@ -1053,13 +1052,13 @@
         face.material.map = createLabelTexture(label, {
           width: 640,
           height: 190,
-          bgTop: "#7fa4d5",
-          bgBottom: "#5f86b5",
-          fg: "#f4f7fb",
-          sub: "#b7c0d1",
-          stroke: "rgba(255,255,255,0.22)",
+          bg: "#ffffff",
+          fg: "#06111f",
+          sub: "#06111f",
+          stroke: accent,
           accent,
-          fontSize: 39
+          fontSize: 39,
+          borderWidth: 12
         });
         face.material.opacity = 1.0;
         face.material.transparent = false;
@@ -1094,40 +1093,54 @@
 
       controller.updateMatrixWorld(true);
       leftControllerUIPanel.updateMatrixWorld(true);
+
+      // Build the right-controller ray in world space.
       xrUIPanelRayOrigin.setFromMatrixPosition(controller.matrixWorld);
       xrUIPanelMatrix.extractRotation(controller.matrixWorld);
       xrUIPanelRayDirection.set(0, 0, -1).applyMatrix4(xrUIPanelMatrix).normalize();
 
-      xrUIPanelRaycaster.set(xrUIPanelRayOrigin, xrUIPanelRayDirection);
+      // Convert the ray into the left UI panel's local coordinates.
+      xrUIPanelLocalOrigin.copy(xrUIPanelRayOrigin);
+      leftControllerUIPanel.worldToLocal(xrUIPanelLocalOrigin);
 
-      // Prefer true raycast hits against the large invisible hitboxes.
-      const hitTargets = leftUIButtons.map(button => button.userData.hitBox).filter(Boolean);
-      const hits = xrUIPanelRaycaster.intersectObjects(hitTargets, false);
+      xrUIPanelLocalEnd.copy(xrUIPanelRayOrigin).addScaledVector(xrUIPanelRayDirection, 1.0);
+      leftControllerUIPanel.worldToLocal(xrUIPanelLocalEnd);
 
-      if (hits.length) {
-        const hitBox = hits[0].object;
-        return { ...hits[0], button: hitBox.userData.ownerButton };
+      xrUIPanelLocalDirection.copy(xrUIPanelLocalEnd).sub(xrUIPanelLocalOrigin).normalize();
+
+      // Intersect with the UI plane at z ~= 0.03, where the invisible hitboxes sit.
+      const planeZ = 0.03;
+      if (Math.abs(xrUIPanelLocalDirection.z) < 0.0001) return null;
+
+      const t = (planeZ - xrUIPanelLocalOrigin.z) / xrUIPanelLocalDirection.z;
+      if (t < 0 || t > 2.0) return null;
+
+      const hitX = xrUIPanelLocalOrigin.x + xrUIPanelLocalDirection.x * t;
+      const hitY = xrUIPanelLocalOrigin.y + xrUIPanelLocalDirection.y * t;
+
+      // Direct rectangle hit in panel-local coordinates. This is far more reliable
+      // than XR raycasting against tiny controller-mounted meshes.
+      for (const button of leftUIButtons) {
+        const w = button.userData.width * 1.35;
+        const h = button.userData.height * 1.55;
+
+        if (
+          hitX >= button.position.x - w / 2 &&
+          hitX <= button.position.x + w / 2 &&
+          hitY >= button.position.y - h / 2 &&
+          hitY <= button.position.y + h / 2
+        ) {
+          return { button };
+        }
       }
 
-      // Fallback: if the Quest controller ray is slightly offset or the panel is at a sharp
-      // angle, choose the closest button centre to the ray within a small tolerance.
+      // Fallback: choose the nearest button if the ray is very close.
       let best = null;
-      const worldPos = new THREE.Vector3();
-
       for (const button of leftUIButtons) {
-        button.updateMatrixWorld(true);
-        worldPos.setFromMatrixPosition(button.matrixWorld);
-
-        const toButton = worldPos.clone().sub(xrUIPanelRayOrigin);
-        const alongRay = toButton.dot(xrUIPanelRayDirection);
-
-        if (alongRay < 0.03 || alongRay > 1.4) continue;
-
-        const closest = xrUIPanelRayOrigin.clone().addScaledVector(xrUIPanelRayDirection, alongRay);
-        const distance = closest.distanceTo(worldPos);
-
-        // This tolerance is deliberately larger than the visible button because the panel is tiny.
-        const tolerance = Math.max(button.userData.width, button.userData.height) * leftControllerUIPanel.scale.x * 0.95;
+        const dx = hitX - button.position.x;
+        const dy = hitY - button.position.y;
+        const distance = Math.hypot(dx, dy);
+        const tolerance = Math.max(button.userData.width, button.userData.height) * 1.15;
 
         if (distance <= tolerance && (!best || distance < best.distance)) {
           best = { button, distance };
@@ -1170,8 +1183,6 @@
 
     function activateLeftUIButton(button) {
       if (!button) return false;
-
-      showARConfirmation("UI BUTTON PRESSED");
 
       const id = button.userData.buttonId;
 
@@ -1381,6 +1392,9 @@
     const xrUIPanelRayDirection = new THREE.Vector3();
     const xrUIPanelMatrix = new THREE.Matrix4();
     const xrUIPanelRaycaster = new THREE.Raycaster();
+    const xrUIPanelLocalOrigin = new THREE.Vector3();
+    const xrUIPanelLocalEnd = new THREE.Vector3();
+    const xrUIPanelLocalDirection = new THREE.Vector3();
 
     const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only if Quest reports the XR origin at head height.
     let isPassthroughAR = false;
@@ -1628,6 +1642,11 @@
       camera.far = Math.max(2000, maxDim * 25);
       camera.updateProjectionMatrix();
 
+      // Re-assert marker positions from their independent world anchors.
+      // The markers must never inherit or follow the OBJ transform.
+      updateFloorMarker(true);
+      updateCeilingMarker(true);
+
       updateRotationReadout();
     }
 
@@ -1853,6 +1872,7 @@
     function updateCeilingMarker(visible = true) {
       ceilingMarker.visible = visible && renderer.xr.isPresenting && xrCeilingManual;
       ceilingMarker.position.copy(ceilingMarkerWorldPosition);
+      ceilingMarker.updateMatrixWorld(true);
     }
 
     function showARConfirmation(message = "AR FLOOR SET") {
@@ -1864,6 +1884,7 @@
     function updateFloorMarker(visible = true) {
       floorMarker.visible = visible && renderer.xr.isPresenting && xrFloorManual;
       floorMarker.position.copy(floorMarkerWorldPosition);
+      floorMarker.updateMatrixWorld(true);
     }
 
     function applyXRFloorPlacement() {
@@ -2058,7 +2079,7 @@
       xrFloorY = controllerPos.y;
       xrFloorMarkerX = controllerPos.x;
       xrFloorMarkerZ = controllerPos.z;
-      floorMarkerWorldPosition.set(controllerPos.x, xrFloorY + 0.006, controllerPos.z);
+      floorMarkerWorldPosition.set(controllerPos.x, xrFloorY + 0.006, controllerPos.z); // fixed world anchor
       xrFloorManual = true;
       xrFloorAutoSet = true;
       applyXRFloorPlacement();
@@ -2102,7 +2123,7 @@
       xrCeilingY = controllerPos.y;
       xrCeilingMarkerX = controllerPos.x;
       xrCeilingMarkerZ = controllerPos.z;
-      ceilingMarkerWorldPosition.set(controllerPos.x, xrCeilingY - 0.006, controllerPos.z);
+      ceilingMarkerWorldPosition.set(controllerPos.x, xrCeilingY - 0.006, controllerPos.z); // fixed world anchor
       xrCeilingManual = true;
       clippingEnabledInput.checked = true;
 
@@ -2498,13 +2519,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the smaller bright control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the high-contrast control panel on your left controller. Markers stay static when the OBJ moves.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the smaller bright control panel on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Green/red markers stay fixed when the OBJ moves. Press left Y to show/hide the high-contrast control panel on your left controller. Markers stay static when the OBJ moves.`
         );
       }
     });
