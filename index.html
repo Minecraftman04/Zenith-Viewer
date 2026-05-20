@@ -395,8 +395,8 @@
 
       <div class="control">
         <div>
-          <b>VR thumbstick movement</b><br />
-          <span>In VR, use the Quest controller thumbstick to move around the 1:1 model.</span>
+          <b>XR controller sticks</b><br />
+          <span>Left thumbstick moves you around. Right thumbstick left/right rotates the model around its Z axis.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -432,7 +432,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration. No head-height setting is used.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rotates Z. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
       </div>
     </div>
   </div>
@@ -603,6 +603,7 @@
     };
 
     const quarterTurn = Math.PI / 2;
+    let controllerZRotation = 0; // Smooth Z-axis rotation added by the right controller thumbstick.
 
     // These are the user-added rotations, separate from the automatic Fusion/CAD Z-up fix.
     const extraRotSteps = {
@@ -650,8 +651,10 @@
     function updateRotationReadout() {
       const x = normaliseDegrees(extraRotSteps.x * 90);
       const y = normaliseDegrees(extraRotSteps.y * 90);
-      const z = normaliseDegrees(extraRotSteps.z * 90);
-      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}°`;
+      const zStep = normaliseDegrees(extraRotSteps.z * 90);
+      const zController = normaliseDegrees(THREE.MathUtils.radToDeg(controllerZRotation));
+      const zTotal = normaliseDegrees(zStep + zController);
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${zTotal.toFixed(0)}°`;
     }
 
     function disposeCurrentModel() {
@@ -751,7 +754,7 @@
 
       object.rotation.x += extraRotSteps.x * quarterTurn;
       object.rotation.y += extraRotSteps.y * quarterTurn;
-      object.rotation.z += extraRotSteps.z * quarterTurn;
+      object.rotation.z += extraRotSteps.z * quarterTurn + controllerZRotation;
 
       object.updateMatrixWorld(true);
 
@@ -1140,8 +1143,58 @@
       );
     }
 
+    function getThumbstickAxes(gamepad) {
+      if (!gamepad || !gamepad.axes || gamepad.axes.length < 2) {
+        return { x: 0, y: 0 };
+      }
+
+      // Quest controllers commonly expose thumbsticks on axes 2/3.
+      // Some browsers expose them on axes 0/1, so fall back if 2/3 are near zero.
+      let x = 0;
+      let y = 0;
+
+      if (gamepad.axes.length >= 4) {
+        x = gamepad.axes[2] || 0;
+        y = gamepad.axes[3] || 0;
+
+        if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) {
+          x = gamepad.axes[0] || 0;
+          y = gamepad.axes[1] || 0;
+        }
+      } else {
+        x = gamepad.axes[0] || 0;
+        y = gamepad.axes[1] || 0;
+      }
+
+      return { x, y };
+    }
+
+    function applyDeadzone(value, deadzone = 0.18) {
+      if (Math.abs(value) < deadzone) return 0;
+      const sign = Math.sign(value);
+      return sign * ((Math.abs(value) - deadzone) / (1 - deadzone));
+    }
+
+    function rotateModelFromRightStick(xAxis, dt) {
+      if (!currentObject) return;
+
+      const input = applyDeadzone(xAxis);
+      if (input === 0) return;
+
+      // Radians per second at full stick deflection.
+      const rotationSpeed = Math.PI * 0.85;
+
+      controllerZRotation += -input * rotationSpeed * dt;
+
+      // Keep the value bounded to avoid huge numbers after long sessions.
+      controllerZRotation = THREE.MathUtils.euclideanModulo(controllerZRotation + Math.PI, Math.PI * 2) - Math.PI;
+
+      // Recalculate centre/floor after rotation without resetting the camera or rewriting the status every frame.
+      applyModelTransform(currentObject);
+    }
+
     function handleXRMovement(dt) {
-      if (!renderer.xr.isPresenting || !moveInput.checked) return;
+      if (!renderer.xr.isPresenting) return;
 
       const session = renderer.xr.getSession();
       if (!session) return;
@@ -1157,24 +1210,32 @@
       right.y = 0;
       if (right.lengthSq() > 0) right.normalize();
 
-      const speed = 1.35; // metres per second
-      const deadzone = 0.18;
+      const moveSpeed = 1.35; // metres per second
 
       for (const source of session.inputSources) {
         const gp = source.gamepad;
-        if (!gp || !gp.axes || gp.axes.length < 2) continue;
+        if (!gp) continue;
 
-        // Quest thumbsticks are commonly axes 2/3; some browsers expose 0/1.
-        const x = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0];
-        const y = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+        const { x, y } = getThumbstickAxes(gp);
 
-        if (Math.abs(x) < deadzone && Math.abs(y) < deadzone) continue;
+        if (source.handedness === "left") {
+          if (!moveInput.checked) continue;
 
-        if (Math.abs(y) >= deadzone) {
-          cameraRig.position.addScaledVector(forward, -y * speed * dt);
+          const moveX = applyDeadzone(x);
+          const moveY = applyDeadzone(y);
+
+          if (moveY !== 0) {
+            cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
+          }
+
+          if (moveX !== 0) {
+            cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
+          }
         }
-        if (Math.abs(x) >= deadzone) {
-          cameraRig.position.addScaledVector(right, x * speed * dt);
+
+        if (source.handedness === "right") {
+          // Right thumbstick left/right rotates the model around its Z axis.
+          rotateModelFromRightStick(x, dt);
         }
       }
     }
@@ -1213,6 +1274,7 @@
       extraRotSteps.x = 0;
       extraRotSteps.y = 0;
       extraRotSteps.z = 0;
+      controllerZRotation = 0;
       reframeCurrentModel(true);
     });
 
