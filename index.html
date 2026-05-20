@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 9</title>
+  <title>Quest OBJ Viewer version 10</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 9</h1>
+        <h1>Quest OBJ Viewer version 10</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays and a compact left-controller panel. Panel colours are fixed and do not change while moving.</span>
+          <span>Shows controller models/rays and a brighter compact left-controller panel. Press left <b>Y</b> to show/hide the panel.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -792,7 +792,7 @@
     leftControllerUIPanel.scale.setScalar(0.62);
 
     const panelBackMaterial = new THREE.MeshBasicMaterial({
-      color: 0x0f1520,
+      color: 0x26364c,
       transparent: true,
       opacity: 0.86,
       side: THREE.DoubleSide,
@@ -804,7 +804,7 @@
       new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true,
-        opacity: 0.30,
+        opacity: 0.16,
         side: THREE.DoubleSide,
         depthTest: false
       })
@@ -822,9 +822,9 @@
     const leftPanelBorder = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.475, 0.375)),
       new THREE.LineBasicMaterial({
-        color: 0x7cc7ff,
+        color: 0xb7dfff,
         transparent: true,
-        opacity: 0.42,
+        opacity: 0.80,
         depthTest: false
       })
     );
@@ -837,8 +837,8 @@
         map: createLabelTexture("OBJ VIEWER\n· LEFT UI", {
           width: 768,
           height: 180,
-          bgTop: "#253348",
-          bgBottom: "#162033",
+          bgTop: "#4b6688",
+          bgBottom: "#2f4768",
           fg: "#ffffff",
           sub: "#b7dfff",
           stroke: "rgba(124,199,255,0.75)",
@@ -894,8 +894,8 @@
           map: createLabelTexture(label, {
             width: 640,
             height: 190,
-            bgTop: "#26364c",
-            bgBottom: "#172235",
+            bgTop: "#526f96",
+            bgBottom: "#39577e",
             fg: "#f4f7fb",
             sub: "#b7c0d1",
             stroke: "rgba(255,255,255,0.22)",
@@ -923,11 +923,11 @@
       return button;
     }
 
-    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON", -0.105, 0.060, 0.190, 0.066, 0x1f4862, "rgba(124,199,255,0.95)");
-    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.105, 0.060, 0.190, 0.066, 0x344052, "rgba(124,199,255,0.95)");
-    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.105, -0.025, 0.190, 0.066, 0x23583c, "rgba(150,240,177,0.95)");
-    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.105, -0.025, 0.190, 0.066, 0x69333a, "rgba(255,139,139,0.95)");
-    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET HEIGHT", 0, -0.110, 0.400, 0.066, 0x42385d, "rgba(205,180,255,0.95)");
+    const leftUICutButton = makeLeftUIButton("toggle_cut", "CUT\nON", -0.105, 0.060, 0.190, 0.066, 0x3f7fa8, "rgba(124,199,255,0.95)");
+    const leftUIAutoButton = makeLeftUIButton("mode_auto", "AUTO", 0.105, 0.060, 0.190, 0.066, 0x5e7799, "rgba(124,199,255,0.95)");
+    const leftUIFloorButton = makeLeftUIButton("mode_floor", "FLOOR", -0.105, -0.025, 0.190, 0.066, 0x4f956b, "rgba(150,240,177,0.95)");
+    const leftUICeilingButton = makeLeftUIButton("mode_ceiling", "CEIL", 0.105, -0.025, 0.190, 0.066, 0xa45460, "rgba(255,139,139,0.95)");
+    const leftUIResetButton = makeLeftUIButton("reset_height", "RESET HEIGHT", 0, -0.110, 0.400, 0.066, 0x7869a5, "rgba(205,180,255,0.95)");
 
     const leftUIHoverIndicator = new THREE.Mesh(
       new THREE.RingGeometry(0.011, 0.017, 32),
@@ -948,7 +948,7 @@
     const leftUIStatus = new THREE.Mesh(
       new THREE.PlaneGeometry(0.400, 0.038),
       new THREE.MeshBasicMaterial({
-        map: createLabelTexture("Right trigger selects", {
+        map: createLabelTexture("Y hides/shows UI", {
           width: 768,
           height: 120,
           bgTop: "#121a28",
@@ -1006,11 +1006,11 @@
       if (!force && key === leftUILastStateKey) return;
       leftUILastStateKey = key;
 
-      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x1f4862, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x344052, "rgba(124,199,255,0.95)");
-      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x23583c, "rgba(150,240,177,0.95)");
-      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0x69333a, "rgba(255,139,139,0.95)");
-      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET HEIGHT" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0x42385d, "rgba(205,180,255,0.95)");
+      updateButtonLabel(leftUICutButton, !isClippingReady() ? "CUT\nWAIT" : (clippingEnabledInput.checked ? "CUT\nON" : "CUT\nOFF"), 0x3f7fa8, "rgba(124,199,255,0.95)");
+      updateButtonLabel(leftUIAutoButton, clipSetModeInput.value === "auto" ? "AUTO*" : "AUTO", 0x5e7799, "rgba(124,199,255,0.95)");
+      updateButtonLabel(leftUIFloorButton, clipSetModeInput.value === "floor" ? "FLOOR*" : "FLOOR", 0x4f956b, "rgba(150,240,177,0.95)");
+      updateButtonLabel(leftUICeilingButton, clipSetModeInput.value === "ceiling" ? "CEIL*" : "CEIL", 0xa45460, "rgba(255,139,139,0.95)");
+      updateButtonLabel(leftUIResetButton, modelVerticalOffset === 0 ? "RESET HEIGHT" : `RESET ${modelVerticalOffset.toFixed(2)}m`, 0x7869a5, "rgba(205,180,255,0.95)");
     }
 
     function updateButtonLabel(button, label, color, accent = "rgba(124,199,255,0.85)") {
@@ -1033,8 +1033,8 @@
         face.material.map = createLabelTexture(label, {
           width: 640,
           height: 190,
-          bgTop: "#26364c",
-          bgBottom: "#172235",
+          bgTop: "#526f96",
+          bgBottom: "#39577e",
           fg: "#f4f7fb",
           sub: "#b7c0d1",
           stroke: "rgba(255,255,255,0.22)",
@@ -1051,7 +1051,7 @@
 
     function updateLeftControllerUIPanel() {
       attachLeftControllerUIPanel();
-      leftControllerUIPanel.visible = renderer.xr.isPresenting && showControllersInput.checked;
+      leftControllerUIPanel.visible = renderer.xr.isPresenting && showControllersInput.checked && leftControllerUIVisible;
       refreshLeftControllerUILabels(false);
     }
 
@@ -1286,6 +1286,8 @@
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
     let leftXButtonWasPressed = false;
+    let leftYButtonWasPressed = false;
+    let leftControllerUIVisible = true;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
@@ -1858,11 +1860,25 @@
     function handleControllerTrigger(triggeringController) {
       if (!renderer.xr.isPresenting) return;
 
-      if (handleLeftControllerUISelection(triggeringController)) {
+      const hand = triggeringController.userData.handedness || "unknown";
+
+      // When the left-controller UI is visible, the right trigger is reserved for the UI.
+      // This stops pressing a UI setting from also setting the floor/ceiling height.
+      if (leftControllerUIPanel.visible && (hand === "right" || hand === "unknown")) {
+        if (handleLeftControllerUISelection(triggeringController)) {
+          return;
+        }
+
+        setStatus(
+          `<span class="err">Right trigger is in UI mode.</span>\n` +
+          `Point at a left-controller UI button, or press left Y to hide the UI before setting floor/ceiling.`
+        );
         return;
       }
 
-      const hand = triggeringController.userData.handedness || "unknown";
+      if (handleLeftControllerUISelection(triggeringController)) {
+        return;
+      }
 
       // Only right trigger confirms floor/ceiling clipping. This avoids accidentally setting
       // the cut when moving the left controller.
@@ -2151,6 +2167,27 @@
       return gamepad.buttons[4]?.pressed || false;
     }
 
+    function isLeftYButtonPressed(gamepad) {
+      if (!gamepad || !gamepad.buttons) return false;
+
+      // In the WebXR standard gamepad mapping, the left controller Y button is commonly button 5.
+      // This is deliberately only checked on the left controller input source.
+      return gamepad.buttons[5]?.pressed || false;
+    }
+
+    function toggleLeftControllerUI(showMessage = true) {
+      leftControllerUIVisible = !leftControllerUIVisible;
+      updateLeftControllerUIPanel();
+
+      if (showMessage) {
+        showARConfirmation(leftControllerUIVisible ? "LEFT UI SHOWN" : "LEFT UI HIDDEN");
+        setStatus(
+          `<span class="ok">Left controller UI ${leftControllerUIVisible ? "shown" : "hidden"}.</span>\n` +
+          `Press the left controller Y button to toggle it again.`
+        );
+      }
+    }
+
     function toggleClippingCuts(showMessage = true) {
       if (!isClippingReady()) {
         clippingEnabledInput.checked = false;
@@ -2212,6 +2249,12 @@
         if (source.handedness === "left") {
           sawLeftController = true;
 
+          const yPressed = isLeftYButtonPressed(gp);
+          if (yPressed && !leftYButtonWasPressed) {
+            toggleLeftControllerUI(true);
+          }
+          leftYButtonWasPressed = yPressed;
+
           const xPressed = isLeftXButtonPressed(gp);
           if (xPressed && !leftXButtonWasPressed) {
             toggleClippingCuts(true);
@@ -2256,6 +2299,7 @@
 
       if (!sawLeftController) {
         leftXButtonWasPressed = false;
+        leftYButtonWasPressed = false;
       }
     }
 
@@ -2307,6 +2351,10 @@
     window.addEventListener("keydown", (event) => {
       if (event.key && event.key.toLowerCase() === "x" && !event.repeat) {
         toggleClippingCuts(true);
+      }
+
+      if (event.key && event.key.toLowerCase() === "y" && !event.repeat) {
+        toggleLeftControllerUI(true);
       }
     });
 
@@ -2371,13 +2419,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. A control panel sits on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Press left Y to show/hide the control panel on your left controller.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. A control panel sits on your left controller.`
+          `Green marker = floor level. Red marker = ceiling cut. Clipping turns on only after the ceiling cut is set. Press left Y to show/hide the control panel on your left controller.`
         );
       }
     });
@@ -2398,6 +2446,7 @@
       xrFloorManual = false;
       rightStickWasPressed = false;
       leftXButtonWasPressed = false;
+      leftYButtonWasPressed = false;
       floorMarker.visible = false;
       ceilingMarker.visible = false;
       leftControllerUIPanel.visible = false;
