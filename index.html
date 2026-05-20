@@ -452,6 +452,14 @@
 
       <div class="control">
         <div>
+          <b>Show controllers in XR</b><br />
+          <span>Shows Quest controller models where supported, plus pointer rays and grip markers as a fallback.</span>
+        </div>
+        <input id="showControllersInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
           <b>Right-stick spin axis</b><br />
           <span>Use Auto for rockets. It picks the model’s longest local axis. If it spins wrong, try X, Y, or Z.</span>
         </div>
@@ -494,7 +502,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue pad = previous model, green pad = next model. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue/left and green/right controller visuals are shown; blue pad = previous model, green pad = next model. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
       </div>
     </div>
   </div>
@@ -506,6 +514,7 @@
     import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
     import { VRButton } from "three/addons/webxr/VRButton.js";
     import { ARButton } from "three/addons/webxr/ARButton.js";
+    import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
     import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
     const objInput = document.getElementById("objInput");
@@ -517,6 +526,7 @@
     const heightModeInput = document.getElementById("heightModeInput");
     const gridInput = document.getElementById("gridInput");
     const moveInput = document.getElementById("moveInput");
+    const showControllersInput = document.getElementById("showControllersInput");
     const spinAxisInput = document.getElementById("spinAxisInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
     const arFloorInput = document.getElementById("arFloorInput");
@@ -579,14 +589,110 @@
     const controllerGrip2 = renderer.xr.getControllerGrip(1);
     scene.add(controller1, controller2, controllerGrip1, controllerGrip2);
 
-    function rememberControllerHand(controller, index, event) {
+    const controllerModelFactory = new XRControllerModelFactory();
+
+    const controllerModel1 = controllerModelFactory.createControllerModel(controllerGrip1);
+    const controllerModel2 = controllerModelFactory.createControllerModel(controllerGrip2);
+    controllerGrip1.add(controllerModel1);
+    controllerGrip2.add(controllerModel2);
+
+    function makeControllerRay(color) {
+      const geometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, -1.15)
+      ]);
+
+      const material = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.82
+      });
+
+      const line = new THREE.Line(geometry, material);
+      line.name = "controller_ray";
+      line.visible = false;
+      return line;
+    }
+
+    function makeGripMarker(color) {
+      const group = new THREE.Group();
+
+      const body = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 18, 12),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.85
+        })
+      );
+      group.add(body);
+
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.045, 0.006, 10, 28),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.9
+        })
+      );
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
+
+      group.name = "controller_grip_marker";
+      group.visible = false;
+      return group;
+    }
+
+    const controllerRay1 = makeControllerRay(0x7cc7ff); // left/first controller blue
+    const controllerRay2 = makeControllerRay(0x96f0b1); // right/second controller green
+    controller1.add(controllerRay1);
+    controller2.add(controllerRay2);
+
+    const gripMarker1 = makeGripMarker(0x7cc7ff);
+    const gripMarker2 = makeGripMarker(0x96f0b1);
+    controllerGrip1.add(gripMarker1);
+    controllerGrip2.add(gripMarker2);
+
+    const xrControllerVisuals = [
+      controllerModel1,
+      controllerModel2,
+      controllerRay1,
+      controllerRay2,
+      gripMarker1,
+      gripMarker2
+    ];
+
+    function updateControllerVisuals() {
+      const show = renderer.xr.isPresenting && showControllersInput.checked;
+      for (const item of xrControllerVisuals) {
+        item.visible = show;
+      }
+    }
+
+    function rememberControllerHand(controller, grip, marker, ray, index, event) {
       const handedness = event?.data?.handedness || "unknown";
       controller.userData.index = index;
       controller.userData.handedness = handedness;
+      grip.userData.index = index;
+      grip.userData.handedness = handedness;
+
+      // Re-colour fallback visuals based on handedness if the browser provides it.
+      const color = handedness === "left" ? 0x7cc7ff : handedness === "right" ? 0x96f0b1 : 0xffd27c;
+
+      marker.traverse((child) => {
+        if (child.material && child.material.color) child.material.color.setHex(color);
+      });
+
+      if (ray.material && ray.material.color) ray.material.color.setHex(color);
+
+      updateControllerVisuals();
     }
 
-    controller1.addEventListener("connected", (event) => rememberControllerHand(controller1, 0, event));
-    controller2.addEventListener("connected", (event) => rememberControllerHand(controller2, 1, event));
+    controller1.addEventListener("connected", (event) => rememberControllerHand(controller1, controllerGrip1, gripMarker1, controllerRay1, 0, event));
+    controller2.addEventListener("connected", (event) => rememberControllerHand(controller2, controllerGrip2, gripMarker2, controllerRay2, 1, event));
+
+    controller1.addEventListener("disconnected", () => updateControllerVisuals());
+    controller2.addEventListener("disconnected", () => updateControllerVisuals());
 
     // Desired workflow:
     // Put the LEFT controller on the real floor, then press the RIGHT trigger.
@@ -1520,6 +1626,7 @@
     });
 
     arHideFloorInput.addEventListener("change", updateGrid);
+    showControllersInput.addEventListener("change", updateControllerVisuals);
     arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
     floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
     floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
@@ -1537,6 +1644,7 @@
       cameraRig.position.set(0, 0, 0);
       showXRModelControls(true);
       xrPanel.visible = true;
+      updateControllerVisuals();
 
       if (isPassthroughAR) {
         scene.background = null;
@@ -1577,6 +1685,7 @@
       floorMarker.visible = false;
       showXRModelControls(false);
       xrPanel.visible = false;
+      updateControllerVisuals();
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
       reframeCurrentModel(true);
@@ -1588,6 +1697,7 @@
 
       if (renderer.xr.isPresenting) {
         autoDetectXRFloor();
+        updateControllerVisuals();
       }
 
       if (arConfirmTimer > 0) {
