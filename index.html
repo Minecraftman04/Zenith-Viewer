@@ -245,6 +245,29 @@
       display: block;
     }
 
+    #xrHoverConfirm {
+      position: fixed;
+      left: 50%;
+      top: calc(max(18px, env(safe-area-inset-top)) + 48px);
+      transform: translateX(-50%);
+      z-index: 30;
+      display: none;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,124,0.75);
+      background: rgba(72, 48, 12, 0.82);
+      color: #fff1cf;
+      font-weight: 800;
+      font-size: 13px;
+      box-shadow: 0 12px 44px rgba(0,0,0,0.45);
+      backdrop-filter: blur(12px);
+      pointer-events: none;
+    }
+
+    #xrHoverConfirm.show {
+      display: block;
+    }
+
     #xrModelControls {
       position: fixed;
       left: 50%;
@@ -344,6 +367,7 @@
 
 <body>
   <div id="arConfirm">AR FLOOR SET</div>
+  <div id="xrHoverConfirm">AIMING AT BUTTON</div>
 
   <div id="xrModelControls">
     <button id="xrPrevModelBtn" type="button">◀ Prev</button>
@@ -502,7 +526,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue/left and green/right controller visuals are shown; blue pad = previous model, green pad = next model. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. In XR, blue/left and green/right controller visuals are shown; blue pad = previous model, green pad = next model. A pad turns amber and an AIMING message appears when your ray is on it. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
       </div>
     </div>
   </div>
@@ -538,6 +562,7 @@
     const rotationReadout = document.getElementById("rotationReadout");
     const ui = document.getElementById("ui");
     const arConfirm = document.getElementById("arConfirm");
+    const xrHoverConfirm = document.getElementById("xrHoverConfirm");
     const xrModelControls = document.getElementById("xrModelControls");
     const xrPrevModelBtn = document.getElementById("xrPrevModelBtn");
     const xrNextModelBtn = document.getElementById("xrNextModelBtn");
@@ -781,6 +806,8 @@
       new THREE.MeshBasicMaterial({ color: 0x7cc7ff, transparent: true, opacity: 0.72 })
     );
     xrPrevPad.name = "XR_PREV_MODEL";
+    xrPrevPad.userData.baseColor = 0x7cc7ff;
+    xrPrevPad.userData.hoverColor = 0xffd27c;
     xrPrevPad.position.set(-0.26, -0.34, -1.04);
     xrPanel.add(xrPrevPad);
 
@@ -789,6 +816,8 @@
       new THREE.MeshBasicMaterial({ color: 0x96f0b1, transparent: true, opacity: 0.72 })
     );
     xrNextPad.name = "XR_NEXT_MODEL";
+    xrNextPad.userData.baseColor = 0x96f0b1;
+    xrNextPad.userData.hoverColor = 0xffd27c;
     xrNextPad.position.set(0.26, -0.34, -1.04);
     xrPanel.add(xrNextPad);
 
@@ -796,6 +825,7 @@
     const xrControllerRayOrigin = new THREE.Vector3();
     const xrControllerRayDirection = new THREE.Vector3();
     const xrControllerMatrix = new THREE.Matrix4();
+    let xrHoveredPanelButton = null;
 
     let currentObject = null;
     let selectedObjFiles = [];
@@ -1356,20 +1386,72 @@
       return null;
     }
 
-    async function handleXRPanelSelection(triggeringController) {
-      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) return false;
+    function getXRPanelHitForController(controller) {
+      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) return null;
+      if (!controller) return null;
 
-      triggeringController.updateMatrixWorld(true);
-      xrControllerRayOrigin.setFromMatrixPosition(triggeringController.matrixWorld);
-      xrControllerMatrix.extractRotation(triggeringController.matrixWorld);
+      controller.updateMatrixWorld(true);
+      xrControllerRayOrigin.setFromMatrixPosition(controller.matrixWorld);
+      xrControllerMatrix.extractRotation(controller.matrixWorld);
       xrControllerRayDirection.set(0, 0, -1).applyMatrix4(xrControllerMatrix).normalize();
 
       xrPanelRaycaster.set(xrControllerRayOrigin, xrControllerRayDirection);
       const hits = xrPanelRaycaster.intersectObjects([xrPrevPad, xrNextPad], false);
 
-      if (!hits.length) return false;
+      return hits.length ? hits[0] : null;
+    }
 
-      const target = hits[0].object;
+    function clearXRPanelHover() {
+      xrHoveredPanelButton = null;
+
+      for (const pad of [xrPrevPad, xrNextPad]) {
+        pad.material.color.setHex(pad.userData.baseColor);
+        pad.material.opacity = 0.72;
+        pad.scale.set(1, 1, 1);
+      }
+
+      xrHoverConfirm.classList.remove("show");
+    }
+
+    function updateXRPanelHover() {
+      if (!renderer.xr.isPresenting || !xrPanel.visible || selectedObjFiles.length <= 1) {
+        clearXRPanelHover();
+        return;
+      }
+
+      const hit1 = getXRPanelHitForController(controller1);
+      const hit2 = getXRPanelHitForController(controller2);
+      const hit = hit2 || hit1; // Prefer the right controller if both are pointing.
+
+      if (!hit) {
+        clearXRPanelHover();
+        return;
+      }
+
+      const target = hit.object;
+      xrHoveredPanelButton = target;
+
+      for (const pad of [xrPrevPad, xrNextPad]) {
+        if (pad === target) {
+          pad.material.color.setHex(pad.userData.hoverColor);
+          pad.material.opacity = 1.0;
+          pad.scale.set(1.28, 1.28, 1.28);
+        } else {
+          pad.material.color.setHex(pad.userData.baseColor);
+          pad.material.opacity = 0.46;
+          pad.scale.set(1, 1, 1);
+        }
+      }
+
+      xrHoverConfirm.textContent = target.name === "XR_PREV_MODEL" ? "AIMING AT PREV — PULL TRIGGER" : "AIMING AT NEXT — PULL TRIGGER";
+      xrHoverConfirm.classList.add("show");
+    }
+
+    async function handleXRPanelSelection(triggeringController) {
+      const hit = getXRPanelHitForController(triggeringController);
+      if (!hit) return false;
+
+      const target = hit.object;
       if (target.name === "XR_PREV_MODEL") {
         await switchModel(-1);
         return true;
@@ -1686,6 +1768,7 @@
       showXRModelControls(false);
       xrPanel.visible = false;
       updateControllerVisuals();
+      clearXRPanelHover();
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
       reframeCurrentModel(true);
@@ -1698,6 +1781,7 @@
       if (renderer.xr.isPresenting) {
         autoDetectXRFloor();
         updateControllerVisuals();
+        updateXRPanelHover();
       }
 
       if (arConfirmTimer > 0) {
