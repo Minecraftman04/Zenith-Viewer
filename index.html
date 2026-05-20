@@ -396,7 +396,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rotates the model around its Z axis.</span>
+          <span>Left thumbstick moves you around. Right thumbstick left/right rotates the model around the global Z axis, even after UI rotations.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -432,7 +432,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rotates Z. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rotates global Z even after UI rotations. If the XR floor is wrong, put the left controller on the real floor and press the right trigger; a green marker confirms calibration.
       </div>
     </div>
   </div>
@@ -603,7 +603,8 @@
     };
 
     const quarterTurn = Math.PI / 2;
-    let controllerZRotation = 0; // Smooth Z-axis rotation added by the right controller thumbstick.
+    let controllerZRotation = 0; // Smooth world/global Z-axis rotation added by the right controller thumbstick.
+    const controllerZQuat = new THREE.Quaternion();
 
     // These are the user-added rotations, separate from the automatic Fusion/CAD Z-up fix.
     const extraRotSteps = {
@@ -754,7 +755,14 @@
 
       object.rotation.x += extraRotSteps.x * quarterTurn;
       object.rotation.y += extraRotSteps.y * quarterTurn;
-      object.rotation.z += extraRotSteps.z * quarterTurn + controllerZRotation;
+      object.rotation.z += extraRotSteps.z * quarterTurn;
+
+      // Apply the right-stick Z rotation around the viewer/world Z axis.
+      // This keeps right-stick Z rotation behaving like a true Z-axis spin even
+      // after the model has been rotated from the UI around X/Y/Z.
+      object.updateMatrix();
+      controllerZQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), controllerZRotation);
+      object.quaternion.premultiply(controllerZQuat);
 
       object.updateMatrixWorld(true);
 
@@ -1234,7 +1242,7 @@
         }
 
         if (source.handedness === "right") {
-          // Right thumbstick left/right rotates the model around its Z axis.
+          // Right thumbstick left/right rotates the model around the global/world Z axis.
           rotateModelFromRightStick(x, dt);
         }
       }
