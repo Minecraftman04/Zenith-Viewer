@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer - mm to 1:1 scale</title>
+  <title>Quest OBJ Viewer version 1</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer</h1>
+        <h1>Quest OBJ Viewer version 1</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -362,6 +362,14 @@
           <span>Leave this on if the model appears lying down without it.</span>
         </div>
         <input id="zUpInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Longest axis vertical</b><br />
+          <span>Normally on. Automatically rotates the model so its longest dimension becomes the vertical Z/up-down axis.</span>
+        </div>
+        <input id="longestAxisVerticalInput" type="checkbox" checked />
       </div>
 
       <div class="control">
@@ -453,7 +461,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. Controller visuals are attached to the headset XR rig, not the OBJ.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis. Controller visuals are attached to the headset XR rig, not the OBJ. “Longest axis vertical” is on by default for rocket-style models.
       </div>
     </div>
   </div>
@@ -473,6 +481,7 @@
     const statusEl = document.getElementById("status");
     const scaleInput = document.getElementById("scaleInput");
     const zUpInput = document.getElementById("zUpInput");
+    const longestAxisVerticalInput = document.getElementById("longestAxisVerticalInput");
     const floorInput = document.getElementById("floorInput");
     const heightModeInput = document.getElementById("heightModeInput");
     const gridInput = document.getElementById("gridInput");
@@ -728,6 +737,7 @@
     const quarterTurn = Math.PI / 2;
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
     let autoSpinAxis = "z";
+    let autoVerticalAxis = "z";
     const spinQuat = new THREE.Quaternion();
     const spinAxisVector = new THREE.Vector3(0, 0, 1);
 
@@ -875,7 +885,24 @@
         autoSpinAxis = "z";
       }
 
+      // Same longest-axis result is used by the new vertical-alignment toggle.
+      autoVerticalAxis = autoSpinAxis;
+
       updateRotationReadout();
+    }
+
+    function applyLongestAxisVerticalRotation(object) {
+      if (!object || !longestAxisVerticalInput.checked) return;
+
+      // In this viewer, the vertical/up-down direction is the Z axis for the model alignment step.
+      // This rotates the model so its longest local axis becomes local Z before the existing
+      // floor/centering logic is applied.
+      if (autoVerticalAxis === "x") {
+        object.rotation.y += -Math.PI / 2;
+      } else if (autoVerticalAxis === "y") {
+        object.rotation.x += Math.PI / 2;
+      }
+      // If autoVerticalAxis is already "z", no extra rotation is needed.
     }
 
     function getSpinAxisVector() {
@@ -909,6 +936,8 @@
       if (zUpInput.checked) {
         object.rotation.x += -Math.PI / 2;
       }
+
+      applyLongestAxisVerticalRotation(object);
 
       object.rotation.x += extraRotSteps.x * quarterTurn;
       object.rotation.y += extraRotSteps.y * quarterTurn;
@@ -980,6 +1009,7 @@
         `Material: ${mtlName ? escapeHTML(mtlName) : "none selected"}\n` +
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
+        `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -1420,6 +1450,7 @@
 
     scaleInput.addEventListener("change", () => reframeCurrentModel(true));
     zUpInput.addEventListener("change", () => reframeCurrentModel(true));
+    longestAxisVerticalInput.addEventListener("change", () => reframeCurrentModel(true));
     floorInput.addEventListener("change", () => reframeCurrentModel(true));
     heightModeInput.addEventListener("change", () => reframeCurrentModel(true));
     spinAxisInput.addEventListener("change", () => reframeCurrentModel(false));
