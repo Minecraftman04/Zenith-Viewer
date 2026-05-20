@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Quest OBJ Viewer - mm to 1:1 scale</title>
+
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: rgba(18, 22, 32, 0.88);
+      --panel2: rgba(255,255,255,0.08);
+      --text: #f4f7fb;
+      --muted: #b7c0d1;
+      --line: rgba(255,255,255,0.14);
+      --accent: #7cc7ff;
+      --bad: #ff8b8b;
+      --good: #96f0b1;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      touch-action: none;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: max(12px, env(safe-area-inset-left));
+      width: min(420px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+      backdrop-filter: blur(14px);
+      z-index: 10;
+    }
+
+    #ui.collapsed {
+      width: auto;
+      max-width: calc(100vw - 24px);
+    }
+
+    #ui.collapsed .body {
+      display: none;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .sub {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    button, label.filebutton {
+      appearance: none;
+      border: 1px solid var(--line);
+      color: var(--text);
+      background: var(--panel2);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-weight: 650;
+      font-size: 14px;
+      cursor: pointer;
+      user-select: none;
+      min-height: 42px;
+    }
+
+    button:hover, label.filebutton:hover {
+      background: rgba(255,255,255,0.13);
+    }
+
+    button.primary, label.primary {
+      background: rgba(124,199,255,0.18);
+      border-color: rgba(124,199,255,0.45);
+    }
+
+    button.small {
+      padding: 8px 10px;
+      min-height: 34px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+
+    .control {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .control:first-of-type {
+      border-top: 0;
+    }
+
+    .control span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    input[type="number"] {
+      width: 96px;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,0.22);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 9px 10px;
+      font-size: 14px;
+    }
+
+    input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      accent-color: #7cc7ff;
+    }
+
+    #status {
+      margin-top: 10px;
+      padding: 10px;
+      min-height: 42px;
+      color: var(--muted);
+      background: rgba(0,0,0,0.22);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 10px;
+    }
+
+    .ok { color: var(--good); }
+    .err { color: var(--bad); }
+
+    #VRButton {
+      position: fixed !important;
+      left: auto !important;
+      right: max(12px, env(safe-area-inset-right)) !important;
+      bottom: max(12px, env(safe-area-inset-bottom)) !important;
+      z-index: 20 !important;
+      border-radius: 999px !important;
+      font: 700 14px system-ui, sans-serif !important;
+      padding: 12px 16px !important;
+      min-width: 112px !important;
+    }
+
+    @media (max-width: 520px) {
+      #ui { font-size: 14px; }
+      h1 { font-size: 16px; }
+      button, label.filebutton { width: 100%; }
+      .row button, .row label.filebutton { flex: 1 1 140px; }
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div id="ui">
+    <div class="topbar">
+      <div>
+        <h1>Quest OBJ Viewer</h1>
+        <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
+      </div>
+      <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
+    </div>
+
+    <div class="body">
+      <div class="row">
+        <label class="filebutton primary" for="fileInput">Choose OBJ / MTL / Textures</label>
+        <input id="fileInput" type="file" multiple accept=".obj,.mtl,.png,.jpg,.jpeg,.webp,.bmp,.gif,.tga,.exr" />
+        <button id="resetBtn">Reset view</button>
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Scale</b><br />
+          <span>Fusion export is in millimetres, so 0.001 converts mm to metres for 1:1 VR.</span>
+        </div>
+        <input id="scaleInput" type="number" step="0.0001" min="0.000001" value="0.001" />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Fusion / CAD Z-up fix</b><br />
+          <span>Leave this on if the model appears lying down without it.</span>
+        </div>
+        <input id="zUpInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Centre model + floor align</b><br />
+          <span>Places the model in the middle of the grid with its lowest point on the floor.</span>
+        </div>
+        <input id="floorInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Show metre grid</b><br />
+          <span>Each large grid square is 1 metre.</span>
+        </div>
+        <input id="gridInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>VR thumbstick movement</b><br />
+          <span>In VR, use the Quest controller thumbstick to move around the 1:1 model.</span>
+        </div>
+        <input id="moveInput" type="checkbox" checked />
+      </div>
+
+      <div id="status">Select <b>Zenith 1.obj</b>. If you have a .mtl file or textures, select them at the same time.</div>
+
+      <div class="hint">
+        Touch/drag to rotate outside VR. Pinch or wheel to zoom. In VR, physically walk around or use the thumbstick.
+        If the Enter VR button does not appear, your browser may not allow WebXR from this page location; try serving this file over HTTPS.
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+    import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
+    import { VRButton } from "three/addons/webxr/VRButton.js";
+    import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const scaleInput = document.getElementById("scaleInput");
+    const zUpInput = document.getElementById("zUpInput");
+    const floorInput = document.getElementById("floorInput");
+    const gridInput = document.getElementById("gridInput");
+    const moveInput = document.getElementById("moveInput");
+    const resetBtn = document.getElementById("resetBtn");
+    const collapseBtn = document.getElementById("collapseBtn");
+    const ui = document.getElementById("ui");
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0d12);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    const cameraRig = new THREE.Group();
+    scene.add(cameraRig);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 2000);
+    camera.position.set(2.8, 1.7, 3.2);
+    cameraRig.add(camera);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.8, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.screenSpacePanning = true;
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
+    scene.add(hemiLight);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun.position.set(3, 6, 4);
+    sun.castShadow = false;
+    scene.add(sun);
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(100, 100),
+      new THREE.MeshStandardMaterial({ color: 0x151922, roughness: 0.95, metalness: 0.0 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    const grid = new THREE.GridHelper(100, 100, 0x6d7b91, 0x273043);
+    grid.position.y = 0.001;
+    scene.add(grid);
+
+    const modelRoot = new THREE.Group();
+    scene.add(modelRoot);
+
+    let currentObject = null;
+    let lastFiles = null;
+    let objectURLs = [];
+    let modelInfo = {
+      loaded: false,
+      size: new THREE.Vector3(1, 1, 1),
+      center: new THREE.Vector3(),
+      maxDim: 2
+    };
+
+    const defaultMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd8dde8,
+      roughness: 0.62,
+      metalness: 0.04
+    });
+
+    const clock = new THREE.Clock();
+    const tempVec = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const xrQuat = new THREE.Quaternion();
+
+    function setStatus(html, isError = false) {
+      statusEl.innerHTML = html;
+      statusEl.className = isError ? "err" : "";
+    }
+
+    function disposeCurrentModel() {
+      objectURLs.forEach(URL.revokeObjectURL);
+      objectURLs = [];
+
+      if (!currentObject) return;
+
+      currentObject.traverse((child) => {
+        if (child.isMesh) {
+          if (child.geometry) child.geometry.dispose();
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach((mat) => {
+            if (!mat) return;
+            for (const key of Object.keys(mat)) {
+              const value = mat[key];
+              if (value && value.isTexture) value.dispose();
+            }
+            mat.dispose?.();
+          });
+        }
+      });
+
+      modelRoot.remove(currentObject);
+      currentObject = null;
+      modelInfo.loaded = false;
+    }
+
+    function normaliseFileName(name) {
+      return decodeURIComponent(String(name || ""))
+        .replaceAll("\\", "/")
+        .split("/")
+        .pop()
+        .trim()
+        .toLowerCase();
+    }
+
+    function readText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Could not read " + file.name));
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.readAsText(file);
+      });
+    }
+
+    function applyDefaultMaterials(object) {
+      object.traverse((child) => {
+        if (!child.isMesh) return;
+
+        if (!child.material) {
+          child.material = defaultMaterial.clone();
+        }
+
+        child.castShadow = false;
+        child.receiveShadow = true;
+
+        if (child.geometry) {
+          child.geometry.computeVertexNormals?.();
+        }
+      });
+    }
+
+    function frameObject(object) {
+      const scale = Number(scaleInput.value) || 0.001;
+
+      object.scale.setScalar(scale);
+      object.rotation.set(0, 0, 0);
+      object.position.set(0, 0, 0);
+
+      if (zUpInput.checked) {
+        object.rotation.x = -Math.PI / 2;
+      }
+
+      object.updateMatrixWorld(true);
+
+      if (floorInput.checked) {
+        const box1 = new THREE.Box3().setFromObject(object);
+        const center1 = box1.getCenter(new THREE.Vector3());
+        object.position.x -= center1.x;
+        object.position.z -= center1.z;
+        object.position.y -= box1.min.y;
+        object.updateMatrixWorld(true);
+      }
+
+      const box = new THREE.Box3().setFromObject(object);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z, 0.1);
+
+      modelInfo = { loaded: true, size, center, maxDim };
+
+      camera.near = Math.max(maxDim / 10000, 0.005);
+      camera.far = Math.max(2000, maxDim * 25);
+      camera.updateProjectionMatrix();
+
+      resetView();
+
+      setStatus(
+        `<span class="ok">Loaded:</span> ${escapeHTML(getObjName(lastFiles) || "OBJ model")}\n` +
+        `Scale: ${scale}  |  Units: mm → metres\n` +
+        `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
+        `Use <b>Enter VR</b> for 1:1 scale on Quest 3.`
+      );
+    }
+
+    function getObjName(files) {
+      if (!files) return "";
+      const obj = [...files].find(f => f.name.toLowerCase().endsWith(".obj"));
+      return obj?.name || "";
+    }
+
+    function escapeHTML(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function loadFiles(files) {
+      if (!files || !files.length) return;
+      lastFiles = files;
+
+      const fileArray = [...files];
+      const objFile = fileArray.find(f => f.name.toLowerCase().endsWith(".obj"));
+      const mtlFile = fileArray.find(f => f.name.toLowerCase().endsWith(".mtl"));
+
+      if (!objFile) {
+        setStatus("No .obj file selected. Select <b>Zenith 1.obj</b>.", true);
+        return;
+      }
+
+      setStatus("Loading " + escapeHTML(objFile.name) + " ...");
+
+      disposeCurrentModel();
+
+      const fileMap = new Map();
+      for (const file of fileArray) {
+        fileMap.set(normaliseFileName(file.name), file);
+      }
+
+      const manager = new THREE.LoadingManager();
+      manager.setURLModifier((url) => {
+        const clean = normaliseFileName(url);
+        const file = fileMap.get(clean);
+
+        if (file) {
+          const objectURL = URL.createObjectURL(file);
+          objectURLs.push(objectURL);
+          return objectURL;
+        }
+
+        return url;
+      });
+
+      try {
+        const objText = await readText(objFile);
+
+        const objLoader = new OBJLoader(manager);
+
+        if (mtlFile) {
+          const mtlText = await readText(mtlFile);
+          const mtlLoader = new MTLLoader(manager);
+          const materials = mtlLoader.parse(mtlText, "./");
+          materials.preload();
+          objLoader.setMaterials(materials);
+        }
+
+        const object = objLoader.parse(objText);
+        object.name = objFile.name;
+
+        applyDefaultMaterials(object);
+
+        currentObject = object;
+        modelRoot.add(currentObject);
+        frameObject(currentObject);
+      } catch (err) {
+        console.error(err);
+        setStatus("Could not load the OBJ.\n" + escapeHTML(err.message || err), true);
+      }
+    }
+
+    function resetView() {
+      const maxDim = modelInfo.loaded ? modelInfo.maxDim : 2;
+      const height = modelInfo.loaded ? modelInfo.size.y : 1.6;
+      const distance = Math.max(maxDim * 1.35, 2.2);
+      const eyeHeight = 1.65;
+
+      cameraRig.position.set(0, 0, 0);
+      camera.position.set(distance * 0.75, Math.max(eyeHeight, height * 0.55), distance);
+      controls.target.set(0, Math.max(0.45, Math.min(height * 0.5, eyeHeight)), 0);
+      controls.update();
+
+      // In VR, this places the player's real head roughly in front of the model.
+      cameraRig.position.set(0, 0, Math.max(maxDim * 0.7, 1.5));
+    }
+
+    function updateGrid() {
+      grid.visible = gridInput.checked;
+      floor.visible = gridInput.checked;
+    }
+
+    function reloadIfPossible() {
+      if (lastFiles && lastFiles.length) loadFiles(lastFiles);
+    }
+
+    function handleXRMovement(dt) {
+      if (!renderer.xr.isPresenting || !moveInput.checked) return;
+
+      const session = renderer.xr.getSession();
+      if (!session) return;
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldQuaternion(xrQuat);
+
+      forward.set(0, 0, -1).applyQuaternion(xrQuat);
+      forward.y = 0;
+      if (forward.lengthSq() > 0) forward.normalize();
+
+      right.set(1, 0, 0).applyQuaternion(xrQuat);
+      right.y = 0;
+      if (right.lengthSq() > 0) right.normalize();
+
+      const speed = 1.35; // metres per second
+      const deadzone = 0.18;
+
+      for (const source of session.inputSources) {
+        const gp = source.gamepad;
+        if (!gp || !gp.axes || gp.axes.length < 2) continue;
+
+        // Quest thumbsticks are commonly axes 2/3; some browsers expose 0/1.
+        const x = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0];
+        const y = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+
+        if (Math.abs(x) < deadzone && Math.abs(y) < deadzone) continue;
+
+        if (Math.abs(y) >= deadzone) {
+          cameraRig.position.addScaledVector(forward, -y * speed * dt);
+        }
+        if (Math.abs(x) >= deadzone) {
+          cameraRig.position.addScaledVector(right, x * speed * dt);
+        }
+      }
+    }
+
+    fileInput.addEventListener("change", (event) => {
+      loadFiles(event.target.files);
+    });
+
+    resetBtn.addEventListener("click", resetView);
+    gridInput.addEventListener("change", updateGrid);
+    scaleInput.addEventListener("change", reloadIfPossible);
+    zUpInput.addEventListener("change", reloadIfPossible);
+    floorInput.addEventListener("change", reloadIfPossible);
+
+    collapseBtn.addEventListener("click", () => {
+      ui.classList.toggle("collapsed");
+      collapseBtn.textContent = ui.classList.contains("collapsed") ? "Show" : "Hide";
+    });
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    renderer.setAnimationLoop(() => {
+      const dt = Math.min(clock.getDelta(), 0.05);
+      handleXRMovement(dt);
+
+      if (!renderer.xr.isPresenting) {
+        controls.update();
+      }
+
+      renderer.render(scene, camera);
+    });
+
+    updateGrid();
+    resetView();
+
+    if (!navigator.xr) {
+      setStatus(
+        "Select <b>Zenith 1.obj</b> to view it normally.\n" +
+        "WebXR was not detected here, so the VR button may not appear on this browser/page location."
+      );
+    }
+  </script>
+</body>
+</html>
