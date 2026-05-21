@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 26</title>
+  <title>Quest OBJ Viewer version 27</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 26</h1>
+        <h1>Quest OBJ Viewer version 27</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -403,16 +403,16 @@
 
       <div class="control">
         <div>
-          <b>XR controller sticks</b><br />
-          <span>In VR, left thumbstick moves you around. In AR/passthrough, left thumbstick moves the OBJ horizontally so real-world tracking stays stable. Right thumbstick left/right rolls the model; up/down adjusts model height. Click the right stick to reset model height only, without changing AR X/Z placement.</span>
+          <b>XR controllers / hand gestures</b><br />
+          <span>Controllers: left stick moves in VR or moves the OBJ horizontally in AR; right stick rolls/raises the OBJ. Hands: pinch and drag with the right hand to move the OBJ horizontally and vertically. Pinch both hands together to confirm floor/ceiling from the left index fingertip.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
 
       <div class="control">
         <div>
-          <b>Show controllers in XR</b><br />
-          <span>Shows controller models/rays attached to the same XR rig as the headset, so they stay aligned with your real controllers.</span>
+          <b>Show controllers / hands in XR</b><br />
+          <span>Shows controller models/rays and WebXR hand models attached to the same XR rig as the headset, so they stay aligned with real tracking.</span>
         </div>
         <input id="showControllersInput" type="checkbox" checked />
       </div>
@@ -449,7 +449,7 @@
       <div class="control">
         <div>
           <b>XR floor calibration</b><br />
-          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
+          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. With hand tracking, touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
         </div>
         <div class="row" style="justify-content:flex-end;margin:0;">
           <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
@@ -467,8 +467,8 @@
 
       <div class="control">
         <div>
-          <b>A + right trigger mode</b><br />
-          <span>Use Auto normally. In VR it only sets the floor. In passthrough/AR it can set the floor or the AR ceiling cut.</span>
+          <b>A + right trigger / hand-pinch mode</b><br />
+          <span>Use Auto normally. Controllers use A + right trigger. Hand tracking uses both-hand pinch with the left index fingertip at the floor or AR ceiling cut height.</span>
         </div>
         <select id="clipSetModeInput">
           <option value="auto" selected>Auto: VR floor / AR floor-ceiling</option>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR, the left stick moves you around. In AR/passthrough, the left stick moves the OBJ horizontally instead, which keeps the real-world camera, controllers, floor marker, and ceiling marker stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor and keeps the current horizontal floor-plane placement unchanged. Controller visuals are attached to the headset XR rig, not the OBJ. In VR, press/hold right-controller A, then press the right trigger to confirm only the left-controller floor height. In AR/passthrough, the same action can set the floor or AR ceiling clipping cut. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Left controller Y briefly fades the fixed markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Controllers still work as before: in VR, the left stick moves you around; in AR/passthrough, the left stick moves the OBJ horizontally so real-world tracking stays stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Hand tracking is now supported too: pinch and drag with the right hand to move the OBJ, pinch with the left hand to reveal markers, and pinch both hands together to set the floor or AR ceiling using the left index fingertip. Controller and hand visuals are attached to the headset XR rig, not the OBJ. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -505,6 +505,7 @@
     import { VRButton } from "three/addons/webxr/VRButton.js";
     import { ARButton } from "three/addons/webxr/ARButton.js";
     import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+    import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
     import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
     const objInput = document.getElementById("objInput");
@@ -549,11 +550,15 @@
     renderer.toneMappingExposure = 1.0;
     document.body.appendChild(renderer.domElement);
 
-    const vrButton = VRButton.createButton(renderer);
+    const xrOptionalFeatures = ["local-floor", "bounded-floor", "hand-tracking"];
+
+    const vrButton = VRButton.createButton(renderer, {
+      optionalFeatures: xrOptionalFeatures
+    });
     document.body.appendChild(vrButton);
 
     const arButton = ARButton.createButton(renderer, {
-      optionalFeatures: ["local-floor", "bounded-floor", "dom-overlay"],
+      optionalFeatures: [...xrOptionalFeatures, "dom-overlay"],
       domOverlay: { root: document.body }
     });
 
@@ -614,11 +619,13 @@
     const controller2 = renderer.xr.getController(1);
     const controllerGrip1 = renderer.xr.getControllerGrip(0);
     const controllerGrip2 = renderer.xr.getControllerGrip(1);
+    const hand1 = renderer.xr.getHand(0);
+    const hand2 = renderer.xr.getHand(1);
 
-    // Important: controllers are children of the same rig as the XR camera.
-    // This keeps the visible controller positions aligned with the real controllers
+    // Important: controllers and hands are children of the same rig as the XR camera.
+    // This keeps the visible controller/hand positions aligned with real tracking
     // even if the virtual view/cameraRig is moved.
-    cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2);
+    cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2, hand1, hand2);
 
     // Floor/ceiling marker anchors live in XR tracking space, not in the OBJ/model space.
     // They are parented to cameraRig on purpose: the camera and controllers are also
@@ -629,11 +636,17 @@
     cameraRig.add(markerAnchorRoot);
 
     const controllerModelFactory = new XRControllerModelFactory();
+    const handModelFactory = new XRHandModelFactory();
 
     const controllerModel1 = controllerModelFactory.createControllerModel(controllerGrip1);
     const controllerModel2 = controllerModelFactory.createControllerModel(controllerGrip2);
     controllerGrip1.add(controllerModel1);
     controllerGrip2.add(controllerModel2);
+
+    const handModel1 = handModelFactory.createHandModel(hand1, "spheres");
+    const handModel2 = handModelFactory.createHandModel(hand2, "spheres");
+    hand1.add(handModel1);
+    hand2.add(handModel2);
 
     function makeControllerRay(color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -701,12 +714,36 @@
       gripMarker2
     ];
 
+    const xrHandVisuals = [handModel1, handModel2];
+
     function updateControllerVisuals() {
       const show = renderer.xr.isPresenting && showControllersInput.checked;
       for (const item of xrControllerVisuals) {
         item.visible = show;
       }
+      for (const item of xrHandVisuals) {
+        item.visible = show;
+      }
     }
+
+    function rememberTrackedHand(hand, index, event) {
+      const inputSource = event?.data || null;
+      hand.userData.index = index;
+      hand.userData.handedness = inputSource?.handedness || "unknown";
+      hand.userData.inputSource = inputSource;
+      updateControllerVisuals();
+    }
+
+    function forgetTrackedHand(hand) {
+      hand.userData.handedness = "unknown";
+      hand.userData.inputSource = null;
+      updateControllerVisuals();
+    }
+
+    hand1.addEventListener("connected", (event) => rememberTrackedHand(hand1, 0, event));
+    hand2.addEventListener("connected", (event) => rememberTrackedHand(hand2, 1, event));
+    hand1.addEventListener("disconnected", () => forgetTrackedHand(hand1));
+    hand2.addEventListener("disconnected", () => forgetTrackedHand(hand2));
 
     function rememberControllerHand(controller, grip, marker, ray, index, event) {
       const inputSource = event?.data || null;
@@ -748,6 +785,10 @@
     // then hold A on the RIGHT controller and press the RIGHT trigger.
     controller1.addEventListener("selectstart", (event) => handleControllerTrigger(controller1, event));
     controller2.addEventListener("selectstart", (event) => handleControllerTrigger(controller2, event));
+
+    // Hand tracking is handled by joint-distance pinch detection in the animation loop.
+    // This is more reliable than relying on selectstart alone, and it also allows
+    // pinch-drag movement without changing the controller workflow.
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
     scene.add(hemiLight);
@@ -895,6 +936,40 @@
     const xrQuat = new THREE.Quaternion();
     const xrCamPos = new THREE.Vector3();
     const controllerPos = new THREE.Vector3();
+    const jointLocalScratch = new THREE.Vector3();
+    const jointWorldScratch = new THREE.Vector3();
+
+    const HAND_PINCH_START_DISTANCE = 0.035;
+    const HAND_PINCH_RELEASE_DISTANCE = 0.055;
+
+    function makeHandGestureState() {
+      return {
+        present: false,
+        inputSource: null,
+        indexWorld: new THREE.Vector3(),
+        thumbWorld: new THREE.Vector3(),
+        wristWorld: new THREE.Vector3(),
+        pinchDistance: Infinity,
+        pinching: false,
+        wasPinching: false,
+        justPinched: false,
+        justReleased: false
+      };
+    }
+
+    const handGestures = {
+      left: makeHandGestureState(),
+      right: makeHandGestureState()
+    };
+
+    const handDragState = {
+      active: false,
+      startHandWorld: new THREE.Vector3(),
+      startHorizontalOffset: new THREE.Vector3(),
+      startVerticalOffset: 0
+    };
+
+    let bothHandsPinchWasActive = false;
 
     const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only if Quest reports the XR origin at head height.
     let isPassthroughAR = false;
@@ -1723,11 +1798,87 @@
       }
     }
 
-    function calibrateXRFloorFromLeftController(triggeringController = null) {
+    function setXRFloorFromWorldPosition(worldPosition, label = "Left controller") {
       if (!renderer.xr.isPresenting) return;
 
       const xrCam = renderer.xr.getCamera(camera);
       xrCam.getWorldPosition(xrCamPos);
+      controllerPos.copy(worldPosition);
+
+      if (!Number.isFinite(controllerPos.y)) {
+        setStatus(
+          `<span class="err">${escapeHTML(label)} position was not available.</span>\n` +
+          `Move your controllers/hands slightly, then try the floor calibration again.`
+        );
+        return;
+      }
+
+      // Prevent accidental calibration from a controller/hand held in mid-air.
+      if (Number.isFinite(xrCamPos.y) && controllerPos.y > xrCamPos.y - 0.70) {
+        setStatus(
+          `<span class="err">${escapeHTML(label)} was not low enough to set the floor.</span>\n` +
+          `Put the left controller or your left index fingertip on the real floor, then confirm again.`
+        );
+        return;
+      }
+
+      xrFloorY = controllerPos.y;
+      savedFloorCutY = controllerPos.y;
+      xrFloorMarkerX = controllerPos.x;
+      xrFloorMarkerZ = controllerPos.z;
+      setFloorMarkerAnchorFromWorld(controllerPos.x, savedFloorCutY, controllerPos.z);
+      xrFloorManual = true;
+      xrFloorAutoSet = true;
+      applyXRFloorPlacement();
+      triggerMarkerReveal(false);
+      showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
+
+      setStatus(
+        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor set.</span>\n` +
+        `${escapeHTML(label)} height is now the floor. The model base is on that level and the OBJ is cut off below it.\n` +
+        `${isPassthroughAR ? "Green marker = floor cut. Red marker = AR ceiling cut. Press left Y or pinch the left hand to reveal markers again." : "Green marker = VR floor. Ceiling cut/clipping is AR-only and disabled in VR."}`
+      );
+    }
+
+    function setXRCeilingFromWorldPosition(worldPosition, label = "Left controller") {
+      if (!renderer.xr.isPresenting) return;
+
+      if (!isPassthroughAR) {
+        showCeilingAROnlyMessage();
+        return;
+      }
+
+      controllerPos.copy(worldPosition);
+
+      if (!Number.isFinite(controllerPos.y)) {
+        setStatus(
+          `<span class="err">${escapeHTML(label)} position was not available.</span>\n` +
+          `Move your controllers/hands slightly, then try the AR ceiling cut again.`
+        );
+        return;
+      }
+
+      xrCeilingY = controllerPos.y;
+      savedCeilingCutY = controllerPos.y;
+      xrCeilingMarkerX = controllerPos.x;
+      xrCeilingMarkerZ = controllerPos.z;
+      setCeilingMarkerAnchorFromWorld(controllerPos.x, savedCeilingCutY, controllerPos.z);
+      xrCeilingManual = true;
+      clippingEnabledInput.checked = true;
+
+      updateClippingPlanes();
+      triggerMarkerReveal(false);
+      showARConfirmation("AR CEILING CUT SET");
+
+      setStatus(
+        `<span class="ok">AR ceiling clipping set.</span>\n` +
+        `The OBJ is now cut off above the ${escapeHTML(label)} height in passthrough/AR only.\n` +
+        `Red marker = AR ceiling cut. Green marker = floor cut.`
+      );
+    }
+
+    function calibrateXRFloorFromLeftController(triggeringController = null) {
+      if (!renderer.xr.isPresenting) return;
 
       let leftObject = getControllerObjectByHand("left", true);
 
@@ -1747,40 +1898,7 @@
 
       leftObject.updateMatrixWorld(true);
       controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
-
-      if (!Number.isFinite(controllerPos.y)) {
-        setStatus(
-          `<span class="err">Left controller position was not available.</span>\n` +
-          `Move both controllers slightly, put the left one on the floor, then press/hold right-controller A and press the right trigger again.`
-        );
-        return;
-      }
-
-      // Prevent accidental calibration from a left controller held in mid-air.
-      if (Number.isFinite(xrCamPos.y) && controllerPos.y > xrCamPos.y - 0.70) {
-        setStatus(
-          `<span class="err">Left controller was not low enough to set the floor.</span>\n` +
-          `Put the left controller flat on the real floor, then press/hold right-controller A and press the right trigger again.`
-        );
-        return;
-      }
-
-      xrFloorY = controllerPos.y;
-      savedFloorCutY = controllerPos.y;
-      xrFloorMarkerX = controllerPos.x;
-      xrFloorMarkerZ = controllerPos.z;
-      setFloorMarkerAnchorFromWorld(controllerPos.x, savedFloorCutY, controllerPos.z);
-      xrFloorManual = true;
-      xrFloorAutoSet = true;
-      applyXRFloorPlacement();
-      triggerMarkerReveal(false);
-      showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
-
-      setStatus(
-        `<span class="ok">${isPassthroughAR ? "AR" : "VR"} floor set.</span>\n` +
-        `Left controller height is now the floor. The model base is on that level and the OBJ is cut off below it.\n` +
-        `${isPassthroughAR ? "Green marker = floor cut. Red marker = AR ceiling cut. Press left Y to reveal markers again." : "Green marker = VR floor. Ceiling cut/clipping is AR-only and disabled in VR."}`
-      );
+      setXRFloorFromWorldPosition(controllerPos, "Left controller");
     }
 
     function calibrateXRCeilingFromLeftController(triggeringController = null) {
@@ -1807,32 +1925,7 @@
 
       leftObject.updateMatrixWorld(true);
       controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
-
-      if (!Number.isFinite(controllerPos.y)) {
-        setStatus(
-          `<span class="err">Left controller position was not available.</span>\n` +
-          `Move both controllers slightly, hold the left one at the cut height, then press/hold right-controller A and press the right trigger again.`
-        );
-        return;
-      }
-
-      xrCeilingY = controllerPos.y;
-      savedCeilingCutY = controllerPos.y;
-      xrCeilingMarkerX = controllerPos.x;
-      xrCeilingMarkerZ = controllerPos.z;
-      setCeilingMarkerAnchorFromWorld(controllerPos.x, savedCeilingCutY, controllerPos.z);
-      xrCeilingManual = true;
-      clippingEnabledInput.checked = true;
-
-      updateClippingPlanes();
-      triggerMarkerReveal(false);
-      showARConfirmation("AR CEILING CUT SET");
-
-      setStatus(
-        `<span class="ok">AR ceiling clipping set.</span>\n` +
-        `The OBJ is now cut off above the left controller height in passthrough/AR only.\n` +
-        `Red marker = AR ceiling cut. Green marker = floor cut.`
-      );
+      setXRCeilingFromWorldPosition(controllerPos, "Left controller");
     }
 
     function nudgeXRCeiling(delta) {
@@ -2085,6 +2178,182 @@
       }
     }
 
+    function getXRJointWorldPosition(inputSource, jointName, frame, target) {
+      if (!inputSource?.hand || !frame) return false;
+
+      const jointSpace = inputSource.hand.get(jointName);
+      const referenceSpace = renderer.xr.getReferenceSpace();
+
+      if (!jointSpace || !referenceSpace) return false;
+
+      const pose = frame.getJointPose(jointSpace, referenceSpace);
+      if (!pose?.transform?.position) return false;
+
+      const p = pose.transform.position;
+      jointLocalScratch.set(p.x, p.y, p.z);
+
+      // Joint poses are in XR reference-space coordinates. cameraRig is the parent
+      // of all XR camera/controller/hand objects, so converting through it gives
+      // the same world-space frame used by the controller calibration code.
+      cameraRig.updateMatrixWorld(true);
+      target.copy(jointLocalScratch);
+      cameraRig.localToWorld(target);
+      return Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z);
+    }
+
+    function beginHandGestureFrame() {
+      for (const state of Object.values(handGestures)) {
+        state.present = false;
+        state.inputSource = null;
+        state.wasPinching = state.pinching;
+        state.justPinched = false;
+        state.justReleased = false;
+        state.pinchDistance = Infinity;
+      }
+    }
+
+    function updateHandGestureFromInputSource(inputSource, frame) {
+      const handedness = inputSource?.handedness;
+      if (handedness !== "left" && handedness !== "right") return;
+
+      const state = handGestures[handedness];
+      const hasIndex = getXRJointWorldPosition(inputSource, "index-finger-tip", frame, state.indexWorld);
+      const hasThumb = getXRJointWorldPosition(inputSource, "thumb-tip", frame, state.thumbWorld);
+      getXRJointWorldPosition(inputSource, "wrist", frame, state.wristWorld);
+
+      if (!hasIndex || !hasThumb) return;
+
+      state.present = true;
+      state.inputSource = inputSource;
+      state.pinchDistance = state.indexWorld.distanceTo(state.thumbWorld);
+
+      const isPinching = state.wasPinching
+        ? state.pinchDistance < HAND_PINCH_RELEASE_DISTANCE
+        : state.pinchDistance < HAND_PINCH_START_DISTANCE;
+
+      state.pinching = isPinching;
+      state.justPinched = isPinching && !state.wasPinching;
+      state.justReleased = !isPinching && state.wasPinching;
+    }
+
+    function finishHandGestureFrame() {
+      for (const state of Object.values(handGestures)) {
+        if (!state.present) {
+          state.pinching = false;
+          state.justPinched = false;
+          state.justReleased = state.wasPinching;
+        }
+      }
+    }
+
+    function confirmHandFloorOrCeiling() {
+      const leftHand = handGestures.left;
+      if (!renderer.xr.isPresenting || !leftHand.present) return;
+
+      if (!isPassthroughAR) {
+        setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+        return;
+      }
+
+      const mode = clipSetModeInput.value;
+      if (mode === "floor") {
+        setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+        return;
+      }
+
+      if (mode === "ceiling") {
+        setXRCeilingFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+        return;
+      }
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      if (Number.isFinite(xrCamPos.y) && leftHand.indexWorld.y < xrCamPos.y - 0.70) {
+        setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+      } else {
+        setXRCeilingFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+      }
+    }
+
+    function handleHandPinchDrag() {
+      if (!renderer.xr.isPresenting || !currentObject || !moveInput.checked) {
+        handDragState.active = false;
+        return;
+      }
+
+      const leftHand = handGestures.left;
+      const rightHand = handGestures.right;
+      const bothPinching = leftHand.present && rightHand.present && leftHand.pinching && rightHand.pinching;
+
+      // Two-hand pinch is reserved for floor/ceiling confirmation, so do not
+      // accidentally drag the OBJ at the same time.
+      if (!rightHand.present || !rightHand.pinching || bothPinching) {
+        handDragState.active = false;
+        return;
+      }
+
+      if (!handDragState.active) {
+        handDragState.active = true;
+        handDragState.startHandWorld.copy(rightHand.indexWorld);
+        handDragState.startHorizontalOffset.copy(modelHorizontalOffset);
+        handDragState.startVerticalOffset = modelVerticalOffset;
+
+        if (rightHand.justPinched) {
+          showARConfirmation("HAND DRAG");
+        }
+        return;
+      }
+
+      jointWorldScratch.copy(rightHand.indexWorld).sub(handDragState.startHandWorld);
+
+      modelHorizontalOffset.x = handDragState.startHorizontalOffset.x + jointWorldScratch.x;
+      modelHorizontalOffset.z = handDragState.startHorizontalOffset.z + jointWorldScratch.z;
+      modelVerticalOffset = handDragState.startVerticalOffset + jointWorldScratch.y;
+
+      modelHorizontalOffset.x = THREE.MathUtils.clamp(modelHorizontalOffset.x, -8.0, 8.0);
+      modelHorizontalOffset.z = THREE.MathUtils.clamp(modelHorizontalOffset.z, -8.0, 8.0);
+      modelVerticalOffset = THREE.MathUtils.clamp(modelVerticalOffset, -3.0, 3.0);
+
+      applyModelTransform(currentObject);
+    }
+
+    function handleHandTracking(frame) {
+      if (!renderer.xr.isPresenting || !frame) {
+        handDragState.active = false;
+        bothHandsPinchWasActive = false;
+        return;
+      }
+
+      const session = renderer.xr.getSession();
+      if (!session) return;
+
+      beginHandGestureFrame();
+
+      for (const source of session.inputSources) {
+        if (source.hand) {
+          updateHandGestureFromInputSource(source, frame);
+        }
+      }
+
+      finishHandGestureFrame();
+
+      const leftHand = handGestures.left;
+      const rightHand = handGestures.right;
+      const bothPinching = leftHand.present && rightHand.present && leftHand.pinching && rightHand.pinching;
+
+      if (bothPinching && !bothHandsPinchWasActive) {
+        confirmHandFloorOrCeiling();
+      }
+      bothHandsPinchWasActive = bothPinching;
+
+      if (leftHand.justPinched && !rightHand.pinching) {
+        triggerMarkerReveal(true);
+      }
+
+      handleHandPinchDrag();
+    }
+
     function handleXRMovement(dt) {
       if (!renderer.xr.isPresenting) return;
 
@@ -2308,14 +2577,14 @@
 
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
-          `To set AR cuts: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick now moves the OBJ horizontally in AR/passthrough instead of moving the XR camera rig, so controller tracking and markers stay stable.`
+          `Controllers: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: put your <b>left index fingertip</b> at the floor or ceiling cut height, then pinch <b>both hands</b> together.\n` +
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y or pinch the left hand to reveal them again. Left stick moves the OBJ horizontally in AR/passthrough; right-hand pinch-drag moves the OBJ with hand tracking.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `Ceiling cut/clipping is disabled in VR. To set the VR floor, put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>.\n` +
-          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `Ceiling cut/clipping is disabled in VR. Controllers: put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together.\n` +
+          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y or pinch the left hand to reveal it again. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -2348,6 +2617,16 @@
       leftXButtonWasPressed = false;
       leftYButtonWasPressed = false;
       rightAButtonWasPressed = false;
+      bothHandsPinchWasActive = false;
+      handDragState.active = false;
+      for (const state of Object.values(handGestures)) {
+        state.present = false;
+        state.inputSource = null;
+        state.pinching = false;
+        state.wasPinching = false;
+        state.justPinched = false;
+        state.justReleased = false;
+      }
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
       setMarkerOpacity(floorMarker, 0);
@@ -2362,7 +2641,7 @@
       updateGrid();
     });
 
-    renderer.setAnimationLoop(() => {
+    renderer.setAnimationLoop((time, frame) => {
       const dt = Math.min(clock.getDelta(), 0.05);
 
       if (renderer.xr.isPresenting) {
@@ -2384,6 +2663,7 @@
         }
       }
 
+      handleHandTracking(frame);
       handleXRMovement(dt);
 
       if (!renderer.xr.isPresenting) {
