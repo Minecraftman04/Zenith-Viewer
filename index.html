@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 20</title>
+  <title>Quest OBJ Viewer version 21</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 20</h1>
+        <h1>Quest OBJ Viewer version 21</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -556,7 +556,42 @@
       optionalFeatures: ["local-floor", "bounded-floor", "dom-overlay"],
       domOverlay: { root: document.body }
     });
-    arButton.textContent = arButton.textContent.replace("AR", "PASSTHROUGH");
+
+    // Three.js ARButton labels are usually strings such as "START AR" / "STOP AR".
+    // Do not use a plain .replace("AR", ...), because it also replaces the "AR"
+    // inside "START" and can create broken labels like "STPASSTHROUGHT AR".
+    let relabellingARButton = false;
+    function relabelARButtonForPassthrough() {
+      if (relabellingARButton) return;
+
+      const currentText = String(arButton.textContent || "").trim();
+      const upperText = currentText.toUpperCase();
+      let nextText = currentText;
+
+      if (!currentText || upperText.includes("START") || upperText.includes("ENTER")) {
+        nextText = "ENTER PASSTHROUGH";
+      } else if (upperText.includes("STOP") || upperText.includes("EXIT")) {
+        nextText = "EXIT PASSTHROUGH";
+      } else if (upperText.includes("AR NOT SUPPORTED")) {
+        nextText = "PASSTHROUGH NOT SUPPORTED";
+      } else if (upperText.includes("WEBXR NOT AVAILABLE")) {
+        nextText = "WEBXR NOT AVAILABLE";
+      }
+
+      if (nextText !== currentText) {
+        relabellingARButton = true;
+        arButton.textContent = nextText;
+        relabellingARButton = false;
+      }
+    }
+
+    relabelARButtonForPassthrough();
+    new MutationObserver(relabelARButtonForPassthrough).observe(arButton, {
+      childList: true,
+      characterData: true,
+      subtree: true
+    });
+
     document.body.appendChild(arButton);
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -585,12 +620,13 @@
     // even if the virtual view/cameraRig is moved.
     cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2);
 
-    // Floor/ceiling marker anchors live in XR tracking space, not in the OBJ/model space.
-    // That means right-stick model movement/rotation and left-stick virtual locomotion do
-    // not drag the green/red markers around after they have been set.
+    // Floor/ceiling marker anchors live in the main scene, not in the OBJ/model space
+    // and not under the movable XR camera rig. That means right-stick model movement,
+    // model rotation, and left-stick virtual locomotion do not drag the green/red
+    // markers around after they have been set.
     const markerAnchorRoot = new THREE.Group();
     markerAnchorRoot.name = "xr_marker_anchor_root";
-    cameraRig.add(markerAnchorRoot);
+    scene.add(markerAnchorRoot);
 
     const controllerModelFactory = new XRControllerModelFactory();
 
@@ -861,9 +897,9 @@
     let xrCeilingMarkerX = 0;
     let xrCeilingMarkerZ = 0;
 
-    // Fixed XR-tracking-space marker anchors. These are changed only when you set/nudge
+    // Fixed world-space marker anchors. These are changed only when you set/nudge
     // the floor or ceiling. Moving/raising/rolling the OBJ must not move them, and
-    // left-stick virtual locomotion should not make them slide around the real room.
+    // left-stick virtual locomotion should not drag them with the XR camera rig.
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
     const markerWorldScratch = new THREE.Vector3();
@@ -1797,29 +1833,28 @@
       }
     }
 
-    function isRightStickPressed(gamepad) {
-      if (!gamepad || !gamepad.buttons) return false;
+    function isGamepadButtonPressed(gamepad, index, valueThreshold = 0.75) {
+      const button = gamepad?.buttons?.[index];
+      if (!button) return false;
+      return button.pressed || Number(button.value || 0) > valueThreshold;
+    }
 
-      // Quest thumbstick click is commonly button 3. Some browsers expose stick clicks
-      // on buttons 3/4, so accept either if pressed.
-      const b3 = gamepad.buttons[3]?.pressed || false;
-      const b4 = gamepad.buttons[4]?.pressed || false;
-      return b3 || b4;
+    function isRightStickPressed(gamepad) {
+      // In the WebXR xr-standard mapping, the primary thumbstick click is button 3.
+      // Do not also treat button 4 as a stick click, because on Quest-style
+      // controllers button 4 is normally the A/X face button.
+      return isGamepadButtonPressed(gamepad, 3);
     }
 
     function isLeftXButtonPressed(gamepad) {
-      if (!gamepad || !gamepad.buttons) return false;
-
-      // In the WebXR standard gamepad mapping, the left controller X button is commonly button 4.
+      // Quest/Touch face button 1: X on the left controller.
       // This is deliberately only checked on the left controller input source.
-      return gamepad.buttons[4]?.pressed || false;
+      return isGamepadButtonPressed(gamepad, 4);
     }
 
     function isLeftYButtonPressed(gamepad) {
-      if (!gamepad || !gamepad.buttons) return false;
-
-      // On Quest Touch controllers, Y is normally exposed as button 5 on the left controller.
-      return gamepad.buttons[5]?.pressed || false;
+      // Quest/Touch face button 2: Y on the left controller.
+      return isGamepadButtonPressed(gamepad, 5);
     }
 
     function toggleClippingCuts(showMessage = true) {
