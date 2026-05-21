@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 22</title>
+  <title>Quest OBJ Viewer version 20</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 22</h1>
+        <h1>Quest OBJ Viewer version 20</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level. Press right A once to set a large blue OBJ placement marker, then press A again to move the OBJ there. If your browser maps the Quest face buttons differently, right B also works as a fallback.</span>
+          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. Left controller Y briefly fades the fixed floor/ceiling markers in, then fades them out again. Right controller A sets a large blue OBJ placement marker on the floor/ray point; press A again to move the OBJ to that marker. Right B is also accepted as a fallback for Quest browser button mapping. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. Left controller Y briefly fades the fixed floor/ceiling markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -802,86 +802,6 @@
     ceilingStem.position.y = -0.225;
     ceilingMarker.add(ceilingStem);
 
-    // Blue OBJ placement marker. Press right-controller A once to place this marker,
-    // then press A again to move the OBJ so its centred base sits on this spot.
-    const objPlacementMarker = new THREE.Group();
-    objPlacementMarker.visible = false;
-    markerAnchorRoot.add(objPlacementMarker);
-
-    const objPlacementRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.24, 0.38, 96),
-      new THREE.MeshBasicMaterial({
-        color: 0x7cc7ff,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.98,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    objPlacementRing.renderOrder = 999;
-    objPlacementRing.rotation.x = -Math.PI / 2;
-    objPlacementMarker.add(objPlacementRing);
-
-    const objPlacementDisk = new THREE.Mesh(
-      new THREE.CircleGeometry(0.17, 64),
-      new THREE.MeshBasicMaterial({
-        color: 0x7cc7ff,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.28,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    objPlacementDisk.renderOrder = 999;
-    objPlacementDisk.rotation.x = -Math.PI / 2;
-    objPlacementDisk.position.y = 0.002;
-    objPlacementMarker.add(objPlacementDisk);
-
-    const objPlacementStem = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.014, 0.014, 1.20, 20),
-      new THREE.MeshBasicMaterial({
-        color: 0x7cc7ff,
-        transparent: true,
-        opacity: 0.92,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    objPlacementStem.renderOrder = 999;
-    objPlacementStem.position.y = 0.60;
-    objPlacementMarker.add(objPlacementStem);
-
-    const objPlacementTopDot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.075, 28, 18),
-      new THREE.MeshBasicMaterial({
-        color: 0x7cc7ff,
-        transparent: true,
-        opacity: 0.98,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    objPlacementTopDot.renderOrder = 999;
-    objPlacementTopDot.position.y = 1.22;
-    objPlacementMarker.add(objPlacementTopDot);
-
-    const objPlacementHalo = new THREE.Mesh(
-      new THREE.TorusGeometry(0.14, 0.008, 12, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x7cc7ff,
-        transparent: true,
-        opacity: 0.95,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    objPlacementHalo.renderOrder = 999;
-    objPlacementHalo.position.y = 1.22;
-    objPlacementHalo.rotation.x = Math.PI / 2;
-    objPlacementMarker.add(objPlacementHalo);
-
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
 
@@ -900,10 +820,7 @@
     const quarterTurn = Math.PI / 2;
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
-    let modelPlacementOffsetX = 0; // OBJ centre placement from the right-controller A marker.
-    let modelPlacementOffsetZ = 0; // OBJ centre placement from the right-controller A marker.
     let rightStickWasPressed = false;
-    let rightAButtonWasPressed = false;
     let leftXButtonWasPressed = false;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
@@ -951,14 +868,6 @@
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
     const markerWorldScratch = new THREE.Vector3();
 
-    let objPlacementTargetActive = false;
-    const objPlacementWorldPosition = new THREE.Vector3(0, 0, 0);
-    const objPlacementLocalPosition = new THREE.Vector3(0, 0.014, 0);
-    const objPlacementRayOrigin = new THREE.Vector3();
-    const objPlacementRayDirection = new THREE.Vector3();
-    const objPlacementRayQuaternion = new THREE.Quaternion();
-    const objPlacementScratch = new THREE.Vector3();
-
     // Marker reveal behaviour: markers stay fixed in XR tracking space, but they
     // are normally hidden. Press left-controller Y to fade any set markers in,
     // briefly show them, then fade them back out.
@@ -986,27 +895,6 @@
       ceilingMarkerWorldPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
     }
 
-    function setObjPlacementMarkerAnchorFromWorld(x, y, z) {
-      markerAnchorRoot.updateMatrixWorld(true);
-      markerWorldScratch.set(x, y + 0.014, z);
-      objPlacementWorldPosition.set(x, y, z);
-      objPlacementLocalPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
-      objPlacementMarker.position.copy(objPlacementLocalPosition);
-      objPlacementMarker.visible = true;
-      objPlacementTargetActive = true;
-    }
-
-    function updateObjPlacementMarker() {
-      objPlacementMarker.position.copy(objPlacementLocalPosition);
-      objPlacementMarker.visible = renderer.xr.isPresenting && objPlacementTargetActive;
-      objPlacementMarker.updateMatrixWorld(true);
-    }
-
-    function clearObjPlacementMarker() {
-      objPlacementTargetActive = false;
-      objPlacementMarker.visible = false;
-    }
-
     let arConfirmTimer = 0;
 
     const floorClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -1031,7 +919,7 @@
       const z = normaliseDegrees(extraRotSteps.z * 90);
       const roll = normaliseDegrees(THREE.MathUtils.radToDeg(controllerLengthAxisRotation));
       const axis = spinAxisInput.value === "auto" ? `auto/${autoSpinAxis.toUpperCase()}` : spinAxisInput.value.toUpperCase();
-      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis}) | Height offset: ${modelVerticalOffset.toFixed(2)} m | Placement X/Z: ${modelPlacementOffsetX.toFixed(2)}, ${modelPlacementOffsetZ.toFixed(2)} m`;
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis}) | Height offset: ${modelVerticalOffset.toFixed(2)} m`;
     }
 
     function disposeCurrentModel() {
@@ -1221,11 +1109,6 @@
       // Extra model height adjustment from the right thumbstick.
       object.position.y += modelVerticalOffset;
 
-      // Right-controller A placement. The model is first centred, then shifted so
-      // its centred X/Z base sits on the saved blue placement marker.
-      object.position.x += modelPlacementOffsetX;
-      object.position.z += modelPlacementOffsetZ;
-
       object.updateMatrixWorld(true);
 
       const box = new THREE.Box3().setFromObject(object);
@@ -1242,7 +1125,6 @@
       // Keep cut markers at their fixed world anchors after every OBJ movement/rotation.
       updateFloorMarker(true);
       updateCeilingMarker(true);
-      updateObjPlacementMarker();
 
       updateRotationReadout();
     }
@@ -1265,7 +1147,6 @@
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
         `XR clipping: ${clippingEnabledInput.checked && isClippingReady() ? "on" : "off"} ${isClippingReady() ? "" : "(waiting for ceiling)"} | Floor ${savedFloorCutY.toFixed(2)} m | Ceiling ${savedCeilingCutY.toFixed(2)} m\n` +
-        `OBJ placement: X ${modelPlacementOffsetX.toFixed(2)} m, Z ${modelPlacementOffsetZ.toFixed(2)} m${objPlacementTargetActive ? " | marker waiting for A confirm" : ""}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
       );
@@ -1296,11 +1177,7 @@
 
       selectedObjFile = objFile;
       modelVerticalOffset = 0;
-      modelPlacementOffsetX = 0;
-      modelPlacementOffsetZ = 0;
       rightStickWasPressed = false;
-      rightAButtonWasPressed = false;
-      clearObjPlacementMarker();
       await reloadModel(true);
     }
 
@@ -1580,7 +1457,6 @@
       updateClippingPlanes();
       updateFloorMarker(true);
       updateCeilingMarker(true);
-      updateObjPlacementMarker();
     }
 
     function autoDetectXRFloor() {
@@ -1921,139 +1797,14 @@
       }
     }
 
-    function getRightControllerRayObject() {
-      return getControllerObjectByHand("right", false) || controller2 || controller1;
-    }
-
-    function getObjPlacementTargetFromRightController() {
-      const rayObject = getRightControllerRayObject();
-      const targetFloorY = getTargetFloorY();
-
-      if (rayObject) {
-        rayObject.updateMatrixWorld(true);
-        objPlacementRayOrigin.setFromMatrixPosition(rayObject.matrixWorld);
-        rayObject.getWorldQuaternion(objPlacementRayQuaternion);
-        objPlacementRayDirection.set(0, 0, -1).applyQuaternion(objPlacementRayQuaternion).normalize();
-      } else {
-        const xrCam = renderer.xr.getCamera(camera);
-        xrCam.updateMatrixWorld(true);
-        xrCam.getWorldPosition(objPlacementRayOrigin);
-        xrCam.getWorldQuaternion(objPlacementRayQuaternion);
-        objPlacementRayDirection.set(0, 0, -1).applyQuaternion(objPlacementRayQuaternion).normalize();
-      }
-
-      let hitValid = false;
-
-      if (Number.isFinite(objPlacementRayOrigin.y) && Math.abs(objPlacementRayDirection.y) > 0.02) {
-        const distanceToFloor = (targetFloorY - objPlacementRayOrigin.y) / objPlacementRayDirection.y;
-
-        if (distanceToFloor > 0.05 && distanceToFloor < 8.0) {
-          objPlacementScratch.copy(objPlacementRayOrigin).addScaledVector(objPlacementRayDirection, distanceToFloor);
-          hitValid = true;
-        }
-      }
-
-      if (!hitValid) {
-        // If the controller is almost level or pointing above the floor, use a comfortable
-        // point in front of the controller and project it down/up onto the current XR floor.
-        objPlacementScratch.copy(objPlacementRayOrigin).addScaledVector(objPlacementRayDirection, 1.25);
-      }
-
-      if (!Number.isFinite(objPlacementScratch.x) || !Number.isFinite(objPlacementScratch.z)) {
-        objPlacementScratch.set(modelPlacementOffsetX, targetFloorY, modelPlacementOffsetZ);
-      }
-
-      objPlacementScratch.y = targetFloorY;
-      return objPlacementScratch;
-    }
-
-    function setObjPlacementTargetFromRightController() {
-      if (!currentObject) {
-        showARConfirmation("LOAD OBJ FIRST");
-        setStatus(
-          `<span class="err">No OBJ is loaded.</span>
-` +
-          `Load the OBJ first, then press the right-controller A button to set a placement marker.`
-        );
-        return;
-      }
-
-      if (!renderer.xr.isPresenting) {
-        setStatus(
-          `<span class="err">OBJ placement marker works in VR/AR.</span>
-` +
-          `Enter VR or passthrough, point the right controller at the floor, then press A.`
-        );
-        return;
-      }
-
-      const target = getObjPlacementTargetFromRightController();
-      setObjPlacementMarkerAnchorFromWorld(target.x, target.y, target.z);
-      showARConfirmation("OBJ MARKER SET");
-      setStatus(
-        `<span class="ok">OBJ placement marker set.</span>
-` +
-        `Blue marker = where the OBJ centre/base will be placed. Press the right-controller A button again to move the OBJ there. If A does not respond on your Quest browser, press right B once; it is accepted as a fallback.
-` +
-        `Target: X ${target.x.toFixed(2)} m, Z ${target.z.toFixed(2)} m.`
-      );
-    }
-
-    function moveObjToPlacementTarget() {
-      if (!currentObject || !objPlacementTargetActive) return;
-
-      modelPlacementOffsetX = objPlacementWorldPosition.x;
-      modelPlacementOffsetZ = objPlacementWorldPosition.z;
-      modelVerticalOffset = 0;
-      applyModelTransform(currentObject);
-      clearObjPlacementMarker();
-      showARConfirmation("OBJ MOVED");
-      setStatus(
-        `<span class="ok">OBJ moved to the blue placement marker.</span>
-` +
-        `The model base is back on the current XR floor and centred at X ${modelPlacementOffsetX.toFixed(2)} m, Z ${modelPlacementOffsetZ.toFixed(2)} m.
-` +
-        `Press A again to set another placement marker.`
-      );
-    }
-
-    function handleRightAPlacement() {
-      if (objPlacementTargetActive) {
-        moveObjToPlacementTarget();
-      } else {
-        setObjPlacementTargetFromRightController();
-      }
-    }
-
-    function isGamepadButtonPressed(button) {
-      if (!button) return false;
-      return !!button.pressed || Number(button.value || 0) > 0.55;
-    }
-
-    function isRightAButtonPressed(gamepad) {
-      if (!gamepad || !gamepad.buttons) return false;
-
-      // Quest Touch right-controller A is normally button 4 in the xr-standard mapping.
-      // Some browser/runtime combinations expose the right face buttons differently,
-      // so version 22 also accepts button 5 and any extra face-button index from 4 upward.
-      // Trigger/grip/thumbstick-click are deliberately excluded so normal movement/clipping
-      // controls do not accidentally place the OBJ.
-      if (isGamepadButtonPressed(gamepad.buttons[4])) return true;
-      if (isGamepadButtonPressed(gamepad.buttons[5])) return true;
-
-      for (let i = 6; i < gamepad.buttons.length; i++) {
-        if (isGamepadButtonPressed(gamepad.buttons[i])) return true;
-      }
-
-      return false;
-    }
-
     function isRightStickPressed(gamepad) {
       if (!gamepad || !gamepad.buttons) return false;
 
-      // Quest thumbstick click is commonly button 3. Face buttons are handled separately
-      // by isRightAButtonPressed(), so A/B should not reset model height.
-      return isGamepadButtonPressed(gamepad.buttons[3]);
+      // Quest thumbstick click is commonly button 3. Some browsers expose stick clicks
+      // on buttons 3/4, so accept either if pressed.
+      const b3 = gamepad.buttons[3]?.pressed || false;
+      const b4 = gamepad.buttons[4]?.pressed || false;
+      return b3 || b4;
     }
 
     function isLeftXButtonPressed(gamepad) {
@@ -2167,13 +1918,6 @@
           // Right thumbstick up/down moves the model itself up/down.
           moveModelHeightFromRightStick(y, dt);
 
-          // Right-controller A: first press sets a floor marker, second press moves the OBJ there.
-          const aPressed = isRightAButtonPressed(gp);
-          if (aPressed && !rightAButtonWasPressed) {
-            handleRightAPlacement();
-          }
-          rightAButtonWasPressed = aPressed;
-
           // Clicking the right thumbstick resets model height back to floor level.
           const stickPressed = isRightStickPressed(gp);
           if (stickPressed && !rightStickWasPressed) {
@@ -2185,7 +1929,6 @@
 
       if (!sawRightController) {
         rightStickWasPressed = false;
-        rightAButtonWasPressed = false;
       }
 
       if (!sawLeftController) {
@@ -2251,14 +1994,6 @@
       if (key === "y") {
         triggerMarkerReveal(true);
       }
-
-      if (key === "a") {
-        handleRightAPlacement();
-      }
-
-      if (key === "a") {
-        handleRightAPlacement();
-      }
     });
 
     window.addEventListener("resize", () => {
@@ -2316,13 +2051,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Press right A once to set a large blue OBJ placement marker, then press A again to move the OBJ there. If your browser maps the Quest face buttons differently, right B also works as a fallback.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Press right A once to set a large blue OBJ placement marker, then press A again to move the OBJ there. If your browser maps the Quest face buttons differently, right B also works as a fallback.`
+          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
         );
       }
     });
@@ -2350,16 +2085,13 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
-      rightAButtonWasPressed = false;
       leftXButtonWasPressed = false;
       leftYButtonWasPressed = false;
       markerRevealTimer = 0;
-      clearObjPlacementMarker();
       setMarkerOpacity(floorMarker, 0);
       setMarkerOpacity(ceilingMarker, 0);
       floorMarker.visible = false;
       ceilingMarker.visible = false;
-      clearObjPlacementMarker();
       updateClippingPlanes();
       updateControllerVisuals();
       arConfirm.classList.remove("show");
@@ -2375,7 +2107,6 @@
         autoDetectXRFloor();
         updateControllerVisuals();
         updateMarkerReveal(dt);
-        updateObjPlacementMarker();
       } else {
         markerRevealTimer = 0;
       }
