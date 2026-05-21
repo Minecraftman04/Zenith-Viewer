@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 24</title>
+  <title>Quest OBJ Viewer version 25</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 24</h1>
+        <h1>Quest OBJ Viewer version 25</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>Left thumbstick moves you around. Right thumbstick left/right rolls the model. Right thumbstick up/down moves the model height. Click the right stick to reset it to floor level.</span>
+          <span>In VR, left thumbstick moves you around. In AR/passthrough, left thumbstick moves the OBJ horizontally so real-world tracking stays stable. Right thumbstick left/right rolls the model; up/down adjusts model height. Click the right stick to reset OBJ placement.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. In VR, press/hold right-controller A, then press the right trigger to confirm only the left-controller floor height. In AR/passthrough, the same action can set the floor or AR ceiling clipping cut. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Left controller Y briefly fades the fixed markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR, the left stick moves you around. In AR/passthrough, the left stick moves the OBJ horizontally instead, which keeps the real-world camera, controllers, floor marker, and ceiling marker stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets the OBJ back to the calibrated floor/origin. Controller visuals are attached to the headset XR rig, not the OBJ. In VR, press/hold right-controller A, then press the right trigger to confirm only the left-controller floor height. In AR/passthrough, the same action can set the floor or AR ceiling clipping cut. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Left controller Y briefly fades the fixed markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -867,6 +867,7 @@
 
     const quarterTurn = Math.PI / 2;
     let controllerLengthAxisRotation = 0; // Smooth roll around the model's own length axis.
+    const modelHorizontalOffset = new THREE.Vector3(0, 0, 0); // AR/passthrough left-stick OBJ movement in metres.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
     let leftXButtonWasPressed = false;
@@ -981,7 +982,7 @@
       const z = normaliseDegrees(extraRotSteps.z * 90);
       const roll = normaliseDegrees(THREE.MathUtils.radToDeg(controllerLengthAxisRotation));
       const axis = spinAxisInput.value === "auto" ? `auto/${autoSpinAxis.toUpperCase()}` : spinAxisInput.value.toUpperCase();
-      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis}) | Height offset: ${modelVerticalOffset.toFixed(2)} m`;
+      rotationReadout.textContent = `Extra rotation: X ${x}°, Y ${y}°, Z ${z}° | Length-axis roll: ${roll.toFixed(0)}° (${axis}) | Height offset: ${modelVerticalOffset.toFixed(2)} m | AR move X/Z: ${modelHorizontalOffset.x.toFixed(2)} / ${modelHorizontalOffset.z.toFixed(2)} m`;
     }
 
     function disposeCurrentModel() {
@@ -1168,6 +1169,12 @@
         object.position.y += 0 - boxBeforeHeight.min.y;
       }
 
+      // Extra model placement adjustments from XR sticks.
+      // In AR/passthrough the left stick moves only the OBJ on the horizontal plane.
+      // It does not move cameraRig, controllers, floor markers, ceiling markers, or the XR tracking space.
+      object.position.x += modelHorizontalOffset.x;
+      object.position.z += modelHorizontalOffset.z;
+
       // Extra model height adjustment from the right thumbstick.
       object.position.y += modelVerticalOffset;
 
@@ -1238,6 +1245,7 @@
       }
 
       selectedObjFile = objFile;
+      modelHorizontalOffset.set(0, 0, 0);
       modelVerticalOffset = 0;
       rightStickWasPressed = false;
       await reloadModel(true);
@@ -1930,7 +1938,35 @@
       applyModelTransform(currentObject);
     }
 
-    function resetModelHeightToFloor(showMessage = true) {
+    function moveOBJHorizontallyInAR(xInput, yInput, dt) {
+      if (!currentObject) return;
+
+      if (xInput === 0 && yInput === 0) return;
+
+      // In passthrough, do not move the XR rig. Moving cameraRig in AR makes
+      // controller tracking, marker positions, and the real room feel wrong.
+      // Instead, move the OBJ itself on the floor plane relative to the headset view.
+      const objectMoveSpeed = 0.75; // metres per second at full stick deflection.
+
+      if (yInput !== 0) {
+        modelHorizontalOffset.addScaledVector(forward, -yInput * objectMoveSpeed * dt);
+      }
+
+      if (xInput !== 0) {
+        modelHorizontalOffset.addScaledVector(right, xInput * objectMoveSpeed * dt);
+      }
+
+      modelHorizontalOffset.y = 0;
+
+      // Keep movement within a useful room-scale area so the OBJ cannot disappear too far away.
+      modelHorizontalOffset.x = THREE.MathUtils.clamp(modelHorizontalOffset.x, -8.0, 8.0);
+      modelHorizontalOffset.z = THREE.MathUtils.clamp(modelHorizontalOffset.z, -8.0, 8.0);
+
+      applyModelTransform(currentObject);
+    }
+
+    function resetModelPlacement(showMessage = true) {
+      modelHorizontalOffset.set(0, 0, 0);
       modelVerticalOffset = 0;
 
       if (currentObject) {
@@ -1938,10 +1974,10 @@
       }
 
       if (showMessage) {
-        showARConfirmation("MODEL RESET TO FLOOR");
+        showARConfirmation("OBJ RESET");
         setStatus(
-          `<span class="ok">Model height reset.</span>\n` +
-          `The model base has been returned to the current floor level.`
+          `<span class="ok">OBJ placement reset.</span>\n` +
+          `The model base has been returned to the current floor level and its AR horizontal movement offset is back at the origin.`
         );
       }
     }
@@ -2080,12 +2116,16 @@
           const moveX = applyDeadzone(x);
           const moveY = applyDeadzone(y);
 
-          if (moveY !== 0) {
-            cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
-          }
+          if (isPassthroughAR) {
+            moveOBJHorizontallyInAR(moveX, moveY, dt);
+          } else {
+            if (moveY !== 0) {
+              cameraRig.position.addScaledVector(forward, -moveY * moveSpeed * dt);
+            }
 
-          if (moveX !== 0) {
-            cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
+            if (moveX !== 0) {
+              cameraRig.position.addScaledVector(right, moveX * moveSpeed * dt);
+            }
           }
         }
 
@@ -2110,7 +2150,7 @@
           // Clicking the right thumbstick resets model height back to floor level.
           const stickPressed = isRightStickPressed(gp);
           if (stickPressed && !rightStickWasPressed) {
-            resetModelHeightToFloor(true);
+            resetModelPlacement(true);
           }
           rightStickWasPressed = stickPressed;
         }
@@ -2135,7 +2175,10 @@
       loadMaterialFiles(event.target.files);
     });
 
-    resetBtn.addEventListener("click", resetView);
+    resetBtn.addEventListener("click", () => {
+      resetModelPlacement(false);
+      resetView();
+    });
     gridInput.addEventListener("change", updateGrid);
 
     scaleInput.addEventListener("change", () => reframeCurrentModel(true));
@@ -2249,7 +2292,7 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set AR cuts: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Moving/raising/rotating the OBJ or using left-stick locomotion should not move them.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick now moves the OBJ horizontally in AR/passthrough instead of moving the XR camera rig, so controller tracking and markers stay stable.`
         );
       } else {
         setStatus(
@@ -2274,6 +2317,8 @@
       clippingEnabledInput.checked = false;
       savedFloorCutY = 0;
       savedCeilingCutY = 2.2;
+      modelHorizontalOffset.set(0, 0, 0);
+      modelVerticalOffset = 0;
       floorMarkerWorldPosition.set(0, savedFloorCutY + 0.006, 0);
       ceilingMarkerWorldPosition.set(0, savedCeilingCutY - 0.006, 0);
       xrFloorMarkerX = 0;
