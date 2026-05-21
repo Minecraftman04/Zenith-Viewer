@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 27</title>
+  <title>Quest OBJ Viewer version 28</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 27</h1>
+        <h1>Quest OBJ Viewer version 28</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controllers / hand gestures</b><br />
-          <span>Controllers: left stick moves in VR or moves the OBJ horizontally in AR; right stick rolls/raises the OBJ. Hands: pinch and drag with the right hand to move the OBJ horizontally and vertically. Pinch both hands together to confirm floor/ceiling from the left index fingertip.</span>
+          <span>Controllers: left stick moves in VR or moves the OBJ horizontally in AR; right stick rolls/raises the OBJ. Hands: right pinch-drag moves the OBJ, left pinch-drag rolls it, right quick pinch resets height, left quick pinch reveals markers, and two-hand pinch grabs the OBJ for move/scale/twist unless your left fingertip is clearly in a floor/ceiling calibration pose.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -449,7 +449,7 @@
       <div class="control">
         <div>
           <b>XR floor calibration</b><br />
-          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. With hand tracking, touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
+          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. With hand tracking, touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together. In Auto mode, two-hand pinch away from the floor now transforms the OBJ instead of accidentally setting a cut. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
         </div>
         <div class="row" style="justify-content:flex-end;margin:0;">
           <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
@@ -468,7 +468,7 @@
       <div class="control">
         <div>
           <b>A + right trigger / hand-pinch mode</b><br />
-          <span>Use Auto normally. Controllers use A + right trigger. Hand tracking uses both-hand pinch with the left index fingertip at the floor or AR ceiling cut height.</span>
+          <span>Use Auto normally. Controllers use A + right trigger. Hand tracking uses both-hand pinch with the left index fingertip at the floor or clearly above eye level for Auto calibration. For a lower AR ceiling/cut height, choose Set AR ceiling cut first so it is not confused with two-hand move/scale/twist.</span>
         </div>
         <select id="clipSetModeInput">
           <option value="auto" selected>Auto: VR floor / AR floor-ceiling</option>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Controllers still work as before: in VR, the left stick moves you around; in AR/passthrough, the left stick moves the OBJ horizontally so real-world tracking stays stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Hand tracking is now supported too: pinch and drag with the right hand to move the OBJ, pinch with the left hand to reveal markers, and pinch both hands together to set the floor or AR ceiling using the left index fingertip. Controller and hand visuals are attached to the headset XR rig, not the OBJ. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Controllers still work as before: in VR, the left stick moves you around; in AR/passthrough, the left stick moves the OBJ horizontally so real-world tracking stays stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Hand tracking is now supported too: right pinch-drag moves the OBJ, left pinch-drag rolls it around the length axis, quick left pinch reveals markers, quick right pinch resets OBJ height, and two-hand pinch lets you move/scale/twist the OBJ. To set the floor or AR ceiling with hands, put the left index fingertip at the calibration height and pinch both hands together. Controller and hand visuals are attached to the headset XR rig, not the OBJ. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -941,6 +941,11 @@
 
     const HAND_PINCH_START_DISTANCE = 0.035;
     const HAND_PINCH_RELEASE_DISTANCE = 0.055;
+    const HAND_TAP_MAX_SECONDS = 0.34;
+    const HAND_TAP_MOVE_MAX = 0.045;
+    const HAND_DRAG_START_DISTANCE = 0.018;
+    const HAND_ROTATE_START_DISTANCE = 0.035;
+    const HAND_TWO_HAND_MIN_DISTANCE = 0.08;
 
     function makeHandGestureState() {
       return {
@@ -949,7 +954,12 @@
         indexWorld: new THREE.Vector3(),
         thumbWorld: new THREE.Vector3(),
         wristWorld: new THREE.Vector3(),
+        pinchStartWorld: new THREE.Vector3(),
         pinchDistance: Infinity,
+        pinchDuration: 0,
+        pinchStartTime: 0,
+        pinchMaxMovement: 0,
+        pinchConsumed: false,
         pinching: false,
         wasPinching: false,
         justPinched: false,
@@ -967,6 +977,23 @@
       startHandWorld: new THREE.Vector3(),
       startHorizontalOffset: new THREE.Vector3(),
       startVerticalOffset: 0
+    };
+
+    const handRotateState = {
+      active: false,
+      startHandWorld: new THREE.Vector3(),
+      startRoll: 0
+    };
+
+    const twoHandTransformState = {
+      active: false,
+      startMidWorld: new THREE.Vector3(),
+      startHorizontalOffset: new THREE.Vector3(),
+      startVerticalOffset: 0,
+      startDistance: 1,
+      startScale: 0.001,
+      startRoll: 0,
+      startAngle: 0
     };
 
     let bothHandsPinchWasActive = false;
@@ -993,6 +1020,9 @@
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
     const markerWorldScratch = new THREE.Vector3();
+    const handMidScratch = new THREE.Vector3();
+    const handDeltaScratch = new THREE.Vector3();
+    const handVectorScratch = new THREE.Vector3();
 
     // Marker reveal behaviour: markers stay fixed in XR tracking space, but they
     // are normally hidden. Press left-controller Y to fade any set markers in,
@@ -2231,48 +2261,181 @@
         ? state.pinchDistance < HAND_PINCH_RELEASE_DISTANCE
         : state.pinchDistance < HAND_PINCH_START_DISTANCE;
 
+      const now = clock.elapsedTime;
+
       state.pinching = isPinching;
       state.justPinched = isPinching && !state.wasPinching;
       state.justReleased = !isPinching && state.wasPinching;
+
+      if (state.justPinched) {
+        state.pinchStartTime = now;
+        state.pinchDuration = 0;
+        state.pinchStartWorld.copy(state.indexWorld);
+        state.pinchMaxMovement = 0;
+        state.pinchConsumed = false;
+      }
+
+      if (state.wasPinching || state.pinching || state.justReleased) {
+        state.pinchDuration = Math.max(0, now - state.pinchStartTime);
+        state.pinchMaxMovement = Math.max(
+          state.pinchMaxMovement,
+          state.indexWorld.distanceTo(state.pinchStartWorld)
+        );
+      }
     }
 
     function finishHandGestureFrame() {
+      const now = clock.elapsedTime;
+
       for (const state of Object.values(handGestures)) {
         if (!state.present) {
           state.pinching = false;
           state.justPinched = false;
           state.justReleased = state.wasPinching;
+
+          if (state.wasPinching) {
+            state.pinchDuration = Math.max(0, now - state.pinchStartTime);
+          }
         }
       }
     }
 
-    function confirmHandFloorOrCeiling() {
+    function getHandCalibrationIntent() {
+      const leftHand = handGestures.left;
+      if (!renderer.xr.isPresenting || !leftHand.present) return "";
+
+      const mode = clipSetModeInput.value;
+      if (mode === "floor") return "floor";
+      if (mode === "ceiling") return isPassthroughAR ? "ceiling" : "ceiling";
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      if (!Number.isFinite(xrCamPos.y)) return "";
+
+      const lowEnoughForFloor = leftHand.indexWorld.y < xrCamPos.y - 0.70;
+      if (lowEnoughForFloor) return "floor";
+
+      // In Auto hand mode, do not treat every chest-height two-hand pinch as an AR ceiling.
+      // That same gesture is now used for grabbing/scaling/twisting the OBJ.
+      // For automatic AR ceiling calibration, raise the left fingertip near/above eye level.
+      // For lower cut heights, choose the explicit "Set AR ceiling cut" mode in the UI.
+      const highEnoughForAutoCeiling = isPassthroughAR && leftHand.indexWorld.y > xrCamPos.y - 0.10;
+      if (highEnoughForAutoCeiling) return "ceiling";
+
+      return "";
+    }
+
+    function confirmHandFloorOrCeiling(intent = "") {
       const leftHand = handGestures.left;
       if (!renderer.xr.isPresenting || !leftHand.present) return;
 
-      if (!isPassthroughAR) {
-        setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
-        return;
-      }
+      const mode = intent || getHandCalibrationIntent();
 
-      const mode = clipSetModeInput.value;
       if (mode === "floor") {
         setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+        leftHand.pinchConsumed = true;
+        handGestures.right.pinchConsumed = true;
         return;
       }
 
       if (mode === "ceiling") {
         setXRCeilingFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+        leftHand.pinchConsumed = true;
+        handGestures.right.pinchConsumed = true;
         return;
       }
+    }
 
-      const xrCam = renderer.xr.getCamera(camera);
-      xrCam.getWorldPosition(xrCamPos);
+    function isQuickUnconsumedHandTap(state) {
+      return state.justReleased &&
+        !state.pinchConsumed &&
+        state.pinchDuration <= HAND_TAP_MAX_SECONDS &&
+        state.pinchMaxMovement <= HAND_TAP_MOVE_MAX;
+    }
 
-      if (Number.isFinite(xrCamPos.y) && leftHand.indexWorld.y < xrCamPos.y - 0.70) {
-        setXRFloorFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
-      } else {
-        setXRCeilingFromWorldPosition(leftHand.indexWorld, "Left hand index fingertip");
+    function getTwoHandDistance() {
+      return Math.max(
+        handGestures.left.indexWorld.distanceTo(handGestures.right.indexWorld),
+        HAND_TWO_HAND_MIN_DISTANCE
+      );
+    }
+
+    function getTwoHandMidpoint(target) {
+      return target.copy(handGestures.left.indexWorld).add(handGestures.right.indexWorld).multiplyScalar(0.5);
+    }
+
+    function getTwoHandHorizontalAngle() {
+      handVectorScratch.copy(handGestures.right.indexWorld).sub(handGestures.left.indexWorld);
+      return Math.atan2(handVectorScratch.z, handVectorScratch.x);
+    }
+
+    function getAngleDelta(current, start) {
+      return Math.atan2(Math.sin(current - start), Math.cos(current - start));
+    }
+
+    function beginTwoHandTransform() {
+      if (!currentObject || !moveInput.checked) return;
+
+      twoHandTransformState.active = true;
+      getTwoHandMidpoint(twoHandTransformState.startMidWorld);
+      twoHandTransformState.startHorizontalOffset.copy(modelHorizontalOffset);
+      twoHandTransformState.startVerticalOffset = modelVerticalOffset;
+      twoHandTransformState.startDistance = getTwoHandDistance();
+      twoHandTransformState.startScale = Number(scaleInput.value) || 0.001;
+      twoHandTransformState.startRoll = controllerLengthAxisRotation;
+      twoHandTransformState.startAngle = getTwoHandHorizontalAngle();
+
+      handGestures.left.pinchConsumed = true;
+      handGestures.right.pinchConsumed = true;
+      handDragState.active = false;
+      handRotateState.active = false;
+      showARConfirmation("TWO-HAND GRAB");
+    }
+
+    function updateTwoHandTransform() {
+      if (!twoHandTransformState.active || !currentObject || !moveInput.checked) return;
+
+      const currentMid = getTwoHandMidpoint(handMidScratch);
+      handDeltaScratch.copy(currentMid).sub(twoHandTransformState.startMidWorld);
+
+      modelHorizontalOffset.copy(twoHandTransformState.startHorizontalOffset);
+      modelHorizontalOffset.addScaledVector(right, handDeltaScratch.dot(right));
+      modelHorizontalOffset.addScaledVector(forward, handDeltaScratch.dot(forward));
+      modelHorizontalOffset.y = 0;
+      modelVerticalOffset = twoHandTransformState.startVerticalOffset + handDeltaScratch.y;
+
+      modelHorizontalOffset.x = THREE.MathUtils.clamp(modelHorizontalOffset.x, -8.0, 8.0);
+      modelHorizontalOffset.z = THREE.MathUtils.clamp(modelHorizontalOffset.z, -8.0, 8.0);
+      modelVerticalOffset = THREE.MathUtils.clamp(modelVerticalOffset, -3.0, 3.0);
+
+      const scaleRatio = THREE.MathUtils.clamp(
+        getTwoHandDistance() / twoHandTransformState.startDistance,
+        0.20,
+        5.00
+      );
+      const nextScale = THREE.MathUtils.clamp(twoHandTransformState.startScale * scaleRatio, 0.000001, 10);
+      scaleInput.value = String(Number(nextScale.toPrecision(6)));
+
+      const angleDelta = getAngleDelta(getTwoHandHorizontalAngle(), twoHandTransformState.startAngle);
+      controllerLengthAxisRotation = twoHandTransformState.startRoll - angleDelta;
+      controllerLengthAxisRotation = THREE.MathUtils.euclideanModulo(controllerLengthAxisRotation + Math.PI, Math.PI * 2) - Math.PI;
+
+      applyModelTransform(currentObject);
+    }
+
+    function handleHandPinchTaps() {
+      const leftHand = handGestures.left;
+      const rightHand = handGestures.right;
+
+      if (isQuickUnconsumedHandTap(leftHand) && !rightHand.pinching) {
+        triggerMarkerReveal(true);
+        leftHand.pinchConsumed = true;
+      }
+
+      if (isQuickUnconsumedHandTap(rightHand) && !leftHand.pinching && currentObject && moveInput.checked) {
+        resetModelHeightOnly(true);
+        rightHand.pinchConsumed = true;
       }
     }
 
@@ -2286,29 +2449,30 @@
       const rightHand = handGestures.right;
       const bothPinching = leftHand.present && rightHand.present && leftHand.pinching && rightHand.pinching;
 
-      // Two-hand pinch is reserved for floor/ceiling confirmation, so do not
-      // accidentally drag the OBJ at the same time.
-      if (!rightHand.present || !rightHand.pinching || bothPinching) {
+      if (!rightHand.present || !rightHand.pinching || bothPinching || twoHandTransformState.active) {
         handDragState.active = false;
         return;
       }
 
       if (!handDragState.active) {
         handDragState.active = true;
-        handDragState.startHandWorld.copy(rightHand.indexWorld);
+        handDragState.startHandWorld.copy(rightHand.pinchStartWorld);
         handDragState.startHorizontalOffset.copy(modelHorizontalOffset);
         handDragState.startVerticalOffset = modelVerticalOffset;
-
-        if (rightHand.justPinched) {
-          showARConfirmation("HAND DRAG");
-        }
-        return;
       }
 
       jointWorldScratch.copy(rightHand.indexWorld).sub(handDragState.startHandWorld);
 
-      modelHorizontalOffset.x = handDragState.startHorizontalOffset.x + jointWorldScratch.x;
-      modelHorizontalOffset.z = handDragState.startHorizontalOffset.z + jointWorldScratch.z;
+      if (jointWorldScratch.length() < HAND_DRAG_START_DISTANCE && !rightHand.pinchConsumed) {
+        return;
+      }
+
+      rightHand.pinchConsumed = true;
+
+      modelHorizontalOffset.copy(handDragState.startHorizontalOffset);
+      modelHorizontalOffset.addScaledVector(right, jointWorldScratch.dot(right));
+      modelHorizontalOffset.addScaledVector(forward, jointWorldScratch.dot(forward));
+      modelHorizontalOffset.y = 0;
       modelVerticalOffset = handDragState.startVerticalOffset + jointWorldScratch.y;
 
       modelHorizontalOffset.x = THREE.MathUtils.clamp(modelHorizontalOffset.x, -8.0, 8.0);
@@ -2318,9 +2482,51 @@
       applyModelTransform(currentObject);
     }
 
+    function handleLeftHandPinchRotate() {
+      if (!renderer.xr.isPresenting || !currentObject || !moveInput.checked) {
+        handRotateState.active = false;
+        return;
+      }
+
+      const leftHand = handGestures.left;
+      const rightHand = handGestures.right;
+      const bothPinching = leftHand.present && rightHand.present && leftHand.pinching && rightHand.pinching;
+
+      if (!leftHand.present || !leftHand.pinching || rightHand.pinching || bothPinching || twoHandTransformState.active) {
+        handRotateState.active = false;
+        return;
+      }
+
+      if (!handRotateState.active) {
+        if (leftHand.indexWorld.distanceTo(leftHand.pinchStartWorld) < HAND_ROTATE_START_DISTANCE) {
+          return;
+        }
+
+        handRotateState.active = true;
+        handRotateState.startHandWorld.copy(leftHand.pinchStartWorld);
+        handRotateState.startRoll = controllerLengthAxisRotation;
+        leftHand.pinchConsumed = true;
+        showARConfirmation("HAND ROLL");
+      }
+
+      jointWorldScratch.copy(leftHand.indexWorld).sub(handRotateState.startHandWorld);
+
+      // Side-to-side movement with the left hand rolls the rocket around its own length axis.
+      // A little vertical movement is mixed in so the gesture still works when the hand is in front of you.
+      const sideAmount = jointWorldScratch.dot(right);
+      const verticalAmount = jointWorldScratch.y;
+      controllerLengthAxisRotation = handRotateState.startRoll - sideAmount * Math.PI * 1.65 + verticalAmount * Math.PI * 0.35;
+      controllerLengthAxisRotation = THREE.MathUtils.euclideanModulo(controllerLengthAxisRotation + Math.PI, Math.PI * 2) - Math.PI;
+      leftHand.pinchConsumed = true;
+
+      applyModelTransform(currentObject);
+    }
+
     function handleHandTracking(frame) {
       if (!renderer.xr.isPresenting || !frame) {
         handDragState.active = false;
+        handRotateState.active = false;
+        twoHandTransformState.active = false;
         bothHandsPinchWasActive = false;
         return;
       }
@@ -2343,15 +2549,25 @@
       const bothPinching = leftHand.present && rightHand.present && leftHand.pinching && rightHand.pinching;
 
       if (bothPinching && !bothHandsPinchWasActive) {
-        confirmHandFloorOrCeiling();
+        const calibrationIntent = getHandCalibrationIntent();
+
+        if (calibrationIntent) {
+          confirmHandFloorOrCeiling(calibrationIntent);
+          twoHandTransformState.active = false;
+        } else {
+          beginTwoHandTransform();
+        }
+      } else if (bothPinching && twoHandTransformState.active) {
+        updateTwoHandTransform();
+      } else if (!bothPinching) {
+        twoHandTransformState.active = false;
       }
+
       bothHandsPinchWasActive = bothPinching;
 
-      if (leftHand.justPinched && !rightHand.pinching) {
-        triggerMarkerReveal(true);
-      }
-
+      handleHandPinchTaps();
       handleHandPinchDrag();
+      handleLeftHandPinchRotate();
     }
 
     function handleXRMovement(dt) {
@@ -2578,13 +2794,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `Controllers: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: put your <b>left index fingertip</b> at the floor or ceiling cut height, then pinch <b>both hands</b> together.\n` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y or pinch the left hand to reveal them again. Left stick moves the OBJ horizontally in AR/passthrough; right-hand pinch-drag moves the OBJ with hand tracking.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y or quick-pinch the left hand to reveal them again. Left stick moves the OBJ horizontally in AR/passthrough. Hands: right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is in a floor/ceiling calibration pose.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `Ceiling cut/clipping is disabled in VR. Controllers: put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together.\n` +
-          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y or pinch the left hand to reveal it again. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y or quick-pinch the left hand to reveal it again. Hands: right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is on the floor for calibration. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -2619,6 +2835,8 @@
       rightAButtonWasPressed = false;
       bothHandsPinchWasActive = false;
       handDragState.active = false;
+      handRotateState.active = false;
+      twoHandTransformState.active = false;
       for (const state of Object.values(handGestures)) {
         state.present = false;
         state.inputSource = null;
@@ -2663,8 +2881,8 @@
         }
       }
 
-      handleHandTracking(frame);
       handleXRMovement(dt);
+      handleHandTracking(frame);
 
       if (!renderer.xr.isPresenting) {
         controls.update();
