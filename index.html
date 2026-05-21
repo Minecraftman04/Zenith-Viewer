@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 30</title>
+  <title>Quest OBJ Viewer version 31</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 30</h1>
+        <h1>Quest OBJ Viewer version 31</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -412,7 +412,7 @@
       <div class="control">
         <div>
           <b>Physical hand grab</b><br />
-          <span>When this is on, pinch movement, pinch rolling, and two-hand pinch scaling/twisting are disabled. Touch the OBJ surface with your fingers/palm, close your hand around it like a real grip, move your hand, then open your hand to release it. Hovering near the model no longer counts.</span>
+          <span>When this is on, pinch movement, pinch rolling, and two-hand pinch scaling/twisting are disabled. Touch the OBJ surface first, then close your fingers around it like a real grip. Opening your hand or losing surface contact releases it, with a short re-grab lockout so it cannot stick back on instantly.</span>
         </div>
         <input id="physicalGrabInput" type="checkbox" checked />
       </div>
@@ -500,7 +500,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Controllers still work as before: in VR, the left stick moves you around; in AR/passthrough, the left stick moves the OBJ horizontally so real-world tracking stays stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Hand tracking is now supported too: with Physical hand grab off, right pinch-drag moves the OBJ, left pinch-drag rolls it around the length axis, quick left pinch reveals markers, quick right pinch resets OBJ height, and two-hand pinch lets you move/scale/twist the OBJ. With Physical hand grab on, pinch movement/scaling/roll gestures are disabled and the hand must touch the OBJ surface before a closed-hand grip picks it up. To set the floor or AR ceiling with hands, put the left index fingertip at the calibration height and pinch both hands together. Controller and hand visuals are attached to the headset XR rig, not the OBJ. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Controllers still work as before: in VR, the left stick moves you around; in AR/passthrough, the left stick moves the OBJ horizontally so real-world tracking stays stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Hand tracking is now supported too: with Physical hand grab off, right pinch-drag moves the OBJ, left pinch-drag rolls it around the length axis, quick left pinch reveals markers, quick right pinch resets OBJ height, and two-hand pinch lets you move/scale/twist the OBJ. With Physical hand grab on, pinch movement/scaling/roll gestures are disabled: touch the OBJ surface first, then close your hand to grab; open your hand or pull away to release. To set the floor or AR ceiling with hands, put the left index fingertip at the calibration height and pinch both hands together. Controller and hand visuals are attached to the headset XR rig, not the OBJ. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -972,6 +972,13 @@
     const HAND_GRAB_SURFACE_CONTACT_MARGIN = 0.035;
     const HAND_GRAB_SURFACE_RELEASE_MARGIN = 0.060;
     const HAND_GRAB_MIN_SURFACE_CONTACTS = 2;
+    const HAND_GRAB_LOST_SURFACE_FRAMES_TO_RELEASE = 3;
+    const HAND_GRAB_OPEN_FRAMES_TO_RELEASE = 2;
+    const HAND_GRAB_REGRAB_COOLDOWN_SECONDS = 0.42;
+    const HAND_GRAB_CLEAR_OPEN_PALM_DISTANCE = 0.135;
+    const HAND_GRAB_CLEAR_OPEN_BASE_DISTANCE = 0.125;
+    const HAND_GRAB_CLEAR_OPEN_WRIST_DISTANCE = 0.185;
+    const HAND_GRAB_CLEAR_OPEN_THUMB_DISTANCE = 0.140;
 
     const handGrabRaycaster = new THREE.Raycaster();
     const handGrabRayDirections = [];
@@ -1047,7 +1054,10 @@
       handedness: "",
       startGrabWorld: new THREE.Vector3(),
       startHorizontalOffset: new THREE.Vector3(),
-      startVerticalOffset: 0
+      startVerticalOffset: 0,
+      lostSurfaceFrames: 0,
+      openFrames: 0,
+      cooldownUntil: 0
     };
 
     const twoHandTransformState = {
@@ -2517,6 +2527,34 @@
       return curledFingers >= Math.min(3, fingerTips.length) && thumbFolded;
     }
 
+    function isHandClearlyOpen(state) {
+      const palm = state.hasPalmWorld ? state.palmWorld : state.wristWorld;
+      const wrist = state.wristWorld;
+      const fingerTips = getHandFingerTipItems(state).filter((item) => item.valid && isValidVector3(item.point));
+
+      if (fingerTips.length < 3 || !isValidVector3(palm) || !isValidVector3(wrist)) return false;
+
+      let openFingers = 0;
+      for (const item of fingerTips) {
+        const awayFromPalm = item.point.distanceTo(palm) > HAND_GRAB_CLEAR_OPEN_PALM_DISTANCE;
+        const awayFromWrist = item.point.distanceTo(wrist) > HAND_GRAB_CLEAR_OPEN_WRIST_DISTANCE;
+        const awayFromBase = item.baseValid && isValidVector3(item.base) && item.point.distanceTo(item.base) > HAND_GRAB_CLEAR_OPEN_BASE_DISTANCE;
+        if (awayFromPalm || awayFromWrist || awayFromBase) openFingers += 1;
+      }
+
+      let nearestThumbToFinger = Infinity;
+      for (const item of fingerTips) {
+        nearestThumbToFinger = Math.min(nearestThumbToFinger, state.thumbWorld.distanceTo(item.point));
+      }
+
+      const thumbOpen =
+        state.thumbWorld.distanceTo(palm) > HAND_GRAB_CLEAR_OPEN_THUMB_DISTANCE ||
+        state.thumbWorld.distanceTo(wrist) > HAND_GRAB_CLEAR_OPEN_THUMB_DISTANCE ||
+        nearestThumbToFinger > HAND_GRAB_CLEAR_OPEN_THUMB_DISTANCE;
+
+      return openFingers >= Math.min(3, fingerTips.length) && thumbOpen;
+    }
+
     function distanceFromPointToBox(point, box) {
       if (!isValidVector3(point) || !box) return Infinity;
       if (box.containsPoint(point)) return 0;
@@ -2619,21 +2657,28 @@
       return target.multiplyScalar(1 / count);
     }
 
-    function endPhysicalHandGrab() {
+    function endPhysicalHandGrab(startCooldown = false) {
       physicalGrabState.active = false;
+      physicalGrabState.handedness = "";
+      physicalGrabState.lostSurfaceFrames = 0;
+      physicalGrabState.openFrames = 0;
+      if (startCooldown) {
+        physicalGrabState.cooldownUntil = clock.elapsedTime + HAND_GRAB_REGRAB_COOLDOWN_SECONDS;
+      }
       handGestures.left.physicalGrabbing = false;
       handGestures.right.physicalGrabbing = false;
     }
 
     function handlePhysicalHandGrab() {
       if (!renderer.xr.isPresenting || !currentObject || !moveInput.checked || !physicalGrabInput.checked) {
-        endPhysicalHandGrab();
+        endPhysicalHandGrab(false);
         return;
       }
 
       // While physical grabbing is enabled, pinch movement/scaling is suppressed.
       twoHandTransformState.active = false;
       handDragState.active = false;
+      handRotateState.active = false;
 
       const leftHand = handGestures.left;
       const rightHand = handGestures.right;
@@ -2641,9 +2686,28 @@
 
       if (physicalGrabState.active) {
         const activeHand = handGestures[physicalGrabState.handedness];
-        if (!activeHand?.present || !activeHand.gripClosed) {
+
+        if (!activeHand?.present) {
           showARConfirmation("OBJ RELEASED");
-          endPhysicalHandGrab();
+          endPhysicalHandGrab(true);
+          return;
+        }
+
+        const handOpen = isHandClearlyOpen(activeHand) || !activeHand.gripClosed;
+        const stillTouchingSurface = doesHandTouchCurrentObjectSurface(activeHand);
+
+        physicalGrabState.openFrames = handOpen
+          ? physicalGrabState.openFrames + 1
+          : 0;
+
+        physicalGrabState.lostSurfaceFrames = stillTouchingSurface
+          ? 0
+          : physicalGrabState.lostSurfaceFrames + 1;
+
+        if (physicalGrabState.openFrames >= HAND_GRAB_OPEN_FRAMES_TO_RELEASE ||
+            physicalGrabState.lostSurfaceFrames >= HAND_GRAB_LOST_SURFACE_FRAMES_TO_RELEASE) {
+          showARConfirmation("OBJ RELEASED");
+          endPhysicalHandGrab(true);
           return;
         }
 
@@ -2667,11 +2731,19 @@
         return;
       }
 
+      // Prevent instant reattachment after a release. Also require the hand to close
+      // while actually touching the mesh surface, rather than allowing an already
+      // closed hand hovering nearby to stick to the OBJ.
+      if (clock.elapsedTime < physicalGrabState.cooldownUntil) return;
+
       for (const state of candidates) {
-        if (!state.present || !state.gripClosed || !doesHandTouchCurrentObjectSurface(state)) continue;
+        const intentionallyClosing = state.gripClosed && !state.wasGripClosed;
+        if (!state.present || !intentionallyClosing || !doesHandTouchCurrentObjectSurface(state)) continue;
 
         physicalGrabState.active = true;
         physicalGrabState.handedness = state === rightHand ? "right" : "left";
+        physicalGrabState.lostSurfaceFrames = 0;
+        physicalGrabState.openFrames = 0;
         getHandGrabPoint(state, physicalGrabState.startGrabWorld);
         physicalGrabState.startHorizontalOffset.copy(modelHorizontalOffset);
         physicalGrabState.startVerticalOffset = modelVerticalOffset;
@@ -3144,13 +3216,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `Controllers: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: put your <b>left index fingertip</b> at the floor or ceiling cut height, then pinch <b>both hands</b> together.\n` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y or quick-pinch the left hand to reveal them again. Left stick moves the OBJ horizontally in AR/passthrough. Hands: with Physical hand grab off, right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is in a floor/ceiling calibration pose. With Physical hand grab on, pinch move/scale/roll is disabled and a closed-hand grip only picks the OBJ up after your hand touches the rendered surface.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y or quick-pinch the left hand to reveal them again. Left stick moves the OBJ horizontally in AR/passthrough. Hands: with Physical hand grab off, right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is in a floor/ceiling calibration pose. With Physical hand grab on, pinch move/scale/roll is disabled; touch the OBJ surface, close your hand to grab, then open or pull away to release.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `Ceiling cut/clipping is disabled in VR. Controllers: put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>. Hand tracking: touch the floor with your <b>left index fingertip</b>, then pinch <b>both hands</b> together.\n` +
-          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y or quick-pinch the left hand to reveal it again. Hands: with Physical hand grab off, right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is on the floor for calibration. With Physical hand grab on, pinch move/scale/roll is disabled and a closed-hand grip only picks the OBJ up after your hand touches the rendered surface. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker is fixed to the XR tracking space, not the OBJ. It fades out after being shown; press left Y or quick-pinch the left hand to reveal it again. Hands: with Physical hand grab off, right pinch-drag moves, left pinch-drag rolls, quick right pinch resets height, and two-hand pinch grabs/scales/twists the OBJ unless your left fingertip is on the floor for calibration. With Physical hand grab on, pinch move/scale/roll is disabled; touch the OBJ surface, close your hand to grab, then open or pull away to release. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
