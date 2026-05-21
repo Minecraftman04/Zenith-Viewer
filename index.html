@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 22</title>
+  <title>Quest OBJ Viewer version 23</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 22</h1>
+        <h1>Quest OBJ Viewer version 23</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -449,7 +449,7 @@
       <div class="control">
         <div>
           <b>XR floor calibration</b><br />
-          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press the <b>right trigger</b>. You can also nudge the floor up/down.</span>
+          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. You can also nudge the floor up/down.</span>
         </div>
         <div class="row" style="justify-content:flex-end;margin:0;">
           <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
@@ -467,8 +467,8 @@
 
       <div class="control">
         <div>
-          <b>Right trigger clipping mode</b><br />
-          <span>Use Auto normally. Put the left controller on the floor or at the ceiling height, then press the right trigger.</span>
+          <b>A + right trigger clipping mode</b><br />
+          <span>Use Auto normally. Put the left controller on the floor or at the ceiling height, then press/hold right-controller <b>A</b> and press the right trigger.</span>
         </div>
         <select id="clipSetModeInput">
           <option value="auto" selected>Auto floor/ceiling</option>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Right trigger confirms the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. Left controller Y briefly fades the fixed floor/ceiling markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. Left stick moves; right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets it to the floor. Controller visuals are attached to the headset XR rig, not the OBJ. Press/hold right-controller A, then press the right trigger to confirm the left-controller floor/ceiling clipping cuts. Left controller X toggles cut-off clipping on/off after a ceiling is set. Left controller Y briefly fades the fixed floor/ceiling markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -709,11 +709,14 @@
     }
 
     function rememberControllerHand(controller, grip, marker, ray, index, event) {
-      const handedness = event?.data?.handedness || "unknown";
+      const inputSource = event?.data || null;
+      const handedness = inputSource?.handedness || "unknown";
       controller.userData.index = index;
       controller.userData.handedness = handedness;
+      controller.userData.inputSource = inputSource;
       grip.userData.index = index;
       grip.userData.handedness = handedness;
+      grip.userData.inputSource = inputSource;
 
       const color = handedness === "left" ? 0x7cc7ff : handedness === "right" ? 0x96f0b1 : 0xffd27c;
 
@@ -729,13 +732,22 @@
     controller1.addEventListener("connected", (event) => rememberControllerHand(controller1, controllerGrip1, gripMarker1, controllerRay1, 0, event));
     controller2.addEventListener("connected", (event) => rememberControllerHand(controller2, controllerGrip2, gripMarker2, controllerRay2, 1, event));
 
-    controller1.addEventListener("disconnected", () => updateControllerVisuals());
-    controller2.addEventListener("disconnected", () => updateControllerVisuals());
+    function forgetControllerHand(controller, grip) {
+      controller.userData.handedness = "unknown";
+      controller.userData.inputSource = null;
+      grip.userData.handedness = "unknown";
+      grip.userData.inputSource = null;
+      updateControllerVisuals();
+    }
+
+    controller1.addEventListener("disconnected", () => forgetControllerHand(controller1, controllerGrip1));
+    controller2.addEventListener("disconnected", () => forgetControllerHand(controller2, controllerGrip2));
 
     // Desired workflow:
-    // Put the LEFT controller on the real floor, then press the RIGHT trigger.
-    controller1.addEventListener("selectstart", () => handleControllerTrigger(controller1));
-    controller2.addEventListener("selectstart", () => handleControllerTrigger(controller2));
+    // Put/hold the LEFT controller at the real floor or ceiling height,
+    // then hold A on the RIGHT controller and press the RIGHT trigger.
+    controller1.addEventListener("selectstart", (event) => handleControllerTrigger(controller1, event));
+    controller2.addEventListener("selectstart", (event) => handleControllerTrigger(controller2, event));
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
     scene.add(hemiLight);
@@ -915,6 +927,13 @@
     const MARKER_REVEAL_TOTAL_SECONDS = MARKER_FADE_IN_SECONDS + MARKER_HOLD_SECONDS + MARKER_FADE_OUT_SECONDS;
     let markerRevealTimer = 0;
     let leftYButtonWasPressed = false;
+
+    // Floor/ceiling cut setting is deliberately armed with right-controller A
+    // before the right trigger can confirm. This prevents accidental cuts when
+    // the trigger is pressed while moving controllers around.
+    const CUT_ARM_SECONDS = 4.0;
+    let xrCutArmTimer = 0;
+    let rightAButtonWasPressed = false;
 
     // Cut heights are separate from the OBJ transform. Moving the OBJ up/down changes
     // modelVerticalOffset only. It must not change these saved cuts or their markers.
@@ -1556,7 +1575,38 @@
       return null;
     }
 
-    function handleControllerTrigger(triggeringController) {
+    function getGamepadForTriggeringController(triggeringController, event = null) {
+      const eventSource = event?.data || null;
+      if (eventSource?.gamepad) return eventSource.gamepad;
+
+      const rememberedSource = triggeringController?.userData?.inputSource || null;
+      if (rememberedSource?.gamepad) return rememberedSource.gamepad;
+
+      const session = renderer.xr.getSession();
+      if (!session) return null;
+
+      const hand = triggeringController?.userData?.handedness || "unknown";
+
+      if (hand !== "unknown") {
+        for (const source of session.inputSources) {
+          if (source.handedness === hand && source.gamepad) {
+            return source.gamepad;
+          }
+        }
+      }
+
+      // If handedness is not available yet, prefer the right controller because
+      // the floor/ceiling arming action is intentionally right A + right trigger.
+      for (const source of session.inputSources) {
+        if (source.handedness === "right" && source.gamepad) {
+          return source.gamepad;
+        }
+      }
+
+      return null;
+    }
+
+    function handleControllerTrigger(triggeringController, event = null) {
       if (!renderer.xr.isPresenting) return;
 
       const hand = triggeringController.userData.handedness || "unknown";
@@ -1565,11 +1615,28 @@
       // the cut when moving the left controller.
       if (hand !== "right" && hand !== "unknown") {
         setStatus(
-          `<span class="err">Use the right trigger to confirm the cut height.</span>\n` +
-          `Move the left controller to the floor or ceiling/cut height, then press the right trigger.`
+          `<span class="err">Use the right controller to confirm the cut height.</span>
+` +
+          `Move the left controller to the floor or ceiling/cut height, then press/hold right-controller A and press the right trigger.`
         );
         return;
       }
+
+      const triggerGamepad = getGamepadForTriggeringController(triggeringController, event);
+      const isAArmed = xrCutArmTimer > 0 || isRightAButtonPressed(triggerGamepad);
+
+      if (!isAArmed) {
+        showARConfirmation("PRESS A FIRST");
+        setStatus(
+          `<span class="err">Cut setting is locked.</span>
+` +
+          `Press or hold <b>A</b> on the right controller first, keep the left controller at the floor/ceiling height, then press the <b>right trigger</b>.`
+        );
+        return;
+      }
+
+      // Consume the one-shot A arming window once a trigger attempt is accepted.
+      xrCutArmTimer = 0;
 
       const mode = clipSetModeInput.value;
 
@@ -1596,7 +1663,7 @@
       if (!leftObject) {
         setStatus(
           `<span class="err">Could not find the left controller.</span>\n` +
-          `Put/hold the left controller at the floor or ceiling cut height, then press the right trigger.`
+          `Put/hold the left controller at the floor or ceiling cut height, then press/hold right-controller A and press the right trigger.`
         );
         return;
       }
@@ -1607,7 +1674,7 @@
       if (!Number.isFinite(controllerPos.y)) {
         setStatus(
           `<span class="err">Left controller position was not available.</span>\n` +
-          `Move both controllers slightly, then press the right trigger again.`
+          `Move both controllers slightly, then press/hold right-controller A and press the right trigger again.`
         );
         return;
       }
@@ -1636,7 +1703,7 @@
       if (!leftObject) {
         setStatus(
           `<span class="err">Could not find the left controller.</span>\n` +
-          `Make sure both Quest controllers are awake, put the left one on the floor, then press the right trigger.`
+          `Make sure both Quest controllers are awake, put the left one on the floor, then press/hold right-controller A and press the right trigger.`
         );
         return;
       }
@@ -1647,7 +1714,7 @@
       if (!Number.isFinite(controllerPos.y)) {
         setStatus(
           `<span class="err">Left controller position was not available.</span>\n` +
-          `Move both controllers slightly, put the left one on the floor, then press the right trigger again.`
+          `Move both controllers slightly, put the left one on the floor, then press/hold right-controller A and press the right trigger again.`
         );
         return;
       }
@@ -1656,7 +1723,7 @@
       if (Number.isFinite(xrCamPos.y) && controllerPos.y > xrCamPos.y - 0.70) {
         setStatus(
           `<span class="err">Left controller was not low enough to set the floor.</span>\n` +
-          `Put the left controller flat on the real floor, then press the right trigger again.`
+          `Put the left controller flat on the real floor, then press/hold right-controller A and press the right trigger again.`
         );
         return;
       }
@@ -1691,7 +1758,7 @@
       if (!leftObject) {
         setStatus(
           `<span class="err">Could not find the left controller.</span>\n` +
-          `Hold the left controller at the ceiling/cut height, then press the right trigger.`
+          `Hold the left controller at the ceiling/cut height, then press/hold right-controller A and press the right trigger.`
         );
         return;
       }
@@ -1702,7 +1769,7 @@
       if (!Number.isFinite(controllerPos.y)) {
         setStatus(
           `<span class="err">Left controller position was not available.</span>\n` +
-          `Move both controllers slightly, hold the left one at the cut height, then press the right trigger again.`
+          `Move both controllers slightly, hold the left one at the cut height, then press/hold right-controller A and press the right trigger again.`
         );
         return;
       }
@@ -1853,6 +1920,28 @@
       return isGamepadButtonPressed(gamepad, 3);
     }
 
+    function isRightAButtonPressed(gamepad) {
+      // Quest/Touch face button 1: A on the right controller.
+      // It shares the xr-standard index with X on the left controller, but this
+      // helper is only used for the right-controller trigger arming action.
+      return isGamepadButtonPressed(gamepad, 4);
+    }
+
+    function armXRClipSetting(showMessage = true) {
+      if (!renderer.xr.isPresenting) return;
+
+      xrCutArmTimer = CUT_ARM_SECONDS;
+
+      if (showMessage) {
+        showARConfirmation("CUT SETTING ARMED");
+        setStatus(
+          `<span class="ok">Floor/ceiling setting armed.</span>
+` +
+          `Keep the left controller at the floor or ceiling height, then press the right trigger to confirm.`
+        );
+      }
+    }
+
     function isLeftXButtonPressed(gamepad) {
       // Quest/Touch face button 1: X on the left controller.
       // This is deliberately only checked on the left controller input source.
@@ -1875,7 +1964,7 @@
           showARConfirmation("SET CEILING FIRST");
           setStatus(
             `<span class="err">Clipping is off because no ceiling cut has been set yet.</span>\n` +
-            `Hold the left controller at the ceiling/cut height and press the right trigger.`
+            `Hold the left controller at the ceiling/cut height, then press/hold right-controller A and press the right trigger.`
           );
         }
         return;
@@ -1954,6 +2043,15 @@
         if (source.handedness === "right") {
           sawRightController = true;
 
+          // Pressing A arms the next right-trigger floor/ceiling cut confirmation.
+          // Holding A while pressing the trigger also works because the trigger
+          // handler checks the live A button state.
+          const aPressed = isRightAButtonPressed(gp);
+          if (aPressed && !rightAButtonWasPressed) {
+            armXRClipSetting(true);
+          }
+          rightAButtonWasPressed = aPressed;
+
           // Right thumbstick left/right rolls the model around its own length axis.
           rotateModelFromRightStick(x, dt);
 
@@ -1971,6 +2069,7 @@
 
       if (!sawRightController) {
         rightStickWasPressed = false;
+        rightAButtonWasPressed = false;
       }
 
       if (!sawLeftController) {
@@ -2058,7 +2157,7 @@
         showARConfirmation("SET CEILING FIRST");
         setStatus(
           `<span class="err">Clipping cannot turn on until a ceiling cut is set.</span>\n` +
-          `Hold the left controller at the ceiling/cut height and press the right trigger.`
+          `Hold the left controller at the ceiling/cut height, then press/hold right-controller A and press the right trigger.`
         );
       }
 
@@ -2092,13 +2191,13 @@
 
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
-          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
+          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>.\n` +
           `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Moving/raising/rotating the OBJ or using left-stick locomotion should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
-          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
+          `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press/hold right-controller <b>A</b>, then press the <b>right trigger</b>.\n` +
           `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Moving/raising/rotating the OBJ or using left-stick locomotion should not move them.`
         );
       }
@@ -2129,7 +2228,9 @@
       rightStickWasPressed = false;
       leftXButtonWasPressed = false;
       leftYButtonWasPressed = false;
+      rightAButtonWasPressed = false;
       markerRevealTimer = 0;
+      xrCutArmTimer = 0;
       setMarkerOpacity(floorMarker, 0);
       setMarkerOpacity(ceilingMarker, 0);
       floorMarker.visible = false;
@@ -2149,8 +2250,12 @@
         autoDetectXRFloor();
         updateControllerVisuals();
         updateMarkerReveal(dt);
+        if (xrCutArmTimer > 0) {
+          xrCutArmTimer = Math.max(0, xrCutArmTimer - dt);
+        }
       } else {
         markerRevealTimer = 0;
+        xrCutArmTimer = 0;
       }
 
       if (arConfirmTimer > 0) {
