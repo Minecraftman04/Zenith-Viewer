@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 25</title>
+  <title>Quest OBJ Viewer version 26</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 25</h1>
+        <h1>Quest OBJ Viewer version 26</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,7 +404,7 @@
       <div class="control">
         <div>
           <b>XR controller sticks</b><br />
-          <span>In VR, left thumbstick moves you around. In AR/passthrough, left thumbstick moves the OBJ horizontally so real-world tracking stays stable. Right thumbstick left/right rolls the model; up/down adjusts model height. Click the right stick to reset OBJ placement.</span>
+          <span>In VR, left thumbstick moves you around. In AR/passthrough, left thumbstick moves the OBJ horizontally so real-world tracking stays stable. Right thumbstick left/right rolls the model; up/down adjusts model height. Click the right stick to reset model height only, without changing AR X/Z placement.</span>
         </div>
         <input id="moveInput" type="checkbox" checked />
       </div>
@@ -492,7 +492,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Pinch or wheel to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR, the left stick moves you around. In AR/passthrough, the left stick moves the OBJ horizontally instead, which keeps the real-world camera, controllers, floor marker, and ceiling marker stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets the OBJ back to the calibrated floor/origin. Controller visuals are attached to the headset XR rig, not the OBJ. In VR, press/hold right-controller A, then press the right trigger to confirm only the left-controller floor height. In AR/passthrough, the same action can set the floor or AR ceiling clipping cut. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Left controller Y briefly fades the fixed markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR, the left stick moves you around. In AR/passthrough, the left stick moves the OBJ horizontally instead, which keeps the real-world camera, controllers, floor marker, and ceiling marker stable. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor and keeps the current horizontal floor-plane placement unchanged. Controller visuals are attached to the headset XR rig, not the OBJ. In VR, press/hold right-controller A, then press the right trigger to confirm only the left-controller floor height. In AR/passthrough, the same action can set the floor or AR ceiling clipping cut. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Left controller Y briefly fades the fixed markers in, then fades them out again. No controller-mounted UI panel is included. AR startup is unchanged from the clean build.
       </div>
     </div>
   </div>
@@ -1982,6 +1982,22 @@
       }
     }
 
+    function resetModelHeightOnly(showMessage = true) {
+      modelVerticalOffset = 0;
+
+      if (currentObject) {
+        applyModelTransform(currentObject);
+      }
+
+      if (showMessage) {
+        showARConfirmation("HEIGHT RESET");
+        setStatus(
+          `<span class="ok">OBJ height reset.</span>\n` +
+          `Only the model height was returned to the current floor level. The current horizontal floor-plane placement was kept unchanged.`
+        );
+      }
+    }
+
     function isGamepadButtonPressed(gamepad, index, valueThreshold = 0.75) {
       const button = gamepad?.buttons?.[index];
       if (!button) return false;
@@ -2147,10 +2163,11 @@
           // Right thumbstick up/down moves the model itself up/down.
           moveModelHeightFromRightStick(y, dt);
 
-          // Clicking the right thumbstick resets model height back to floor level.
+          // Clicking the right thumbstick resets only model height back to floor level.
+          // It deliberately leaves the AR horizontal X/Z placement untouched.
           const stickPressed = isRightStickPressed(gp);
           if (stickPressed && !rightStickWasPressed) {
-            resetModelPlacement(true);
+            resetModelHeightOnly(true);
           }
           rightStickWasPressed = stickPressed;
         }
