@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 21</title>
+  <title>Quest OBJ Viewer version 22</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 21</h1>
+        <h1>Quest OBJ Viewer version 22</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -620,13 +620,13 @@
     // even if the virtual view/cameraRig is moved.
     cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2);
 
-    // Floor/ceiling marker anchors live in the main scene, not in the OBJ/model space
-    // and not under the movable XR camera rig. That means right-stick model movement,
-    // model rotation, and left-stick virtual locomotion do not drag the green/red
-    // markers around after they have been set.
+    // Floor/ceiling marker anchors live in XR tracking space, not in the OBJ/model space.
+    // They are parented to cameraRig on purpose: the camera and controllers are also
+    // children of this rig, so marker local positions remain locked to the same real-world
+    // XR reference-space position even when virtual locomotion moves the rig.
     const markerAnchorRoot = new THREE.Group();
     markerAnchorRoot.name = "xr_marker_anchor_root";
-    scene.add(markerAnchorRoot);
+    cameraRig.add(markerAnchorRoot);
 
     const controllerModelFactory = new XRControllerModelFactory();
 
@@ -897,9 +897,11 @@
     let xrCeilingMarkerX = 0;
     let xrCeilingMarkerZ = 0;
 
-    // Fixed world-space marker anchors. These are changed only when you set/nudge
-    // the floor or ceiling. Moving/raising/rolling the OBJ must not move them, and
-    // left-stick virtual locomotion should not drag them with the XR camera rig.
+    // Fixed marker anchors stored in markerAnchorRoot local space.
+    // These are changed only when you set/nudge the floor or ceiling.
+    // Moving/raising/rolling the OBJ must not move them.
+    // Because markerAnchorRoot is parented to cameraRig, left-stick virtual locomotion
+    // also cannot make them drift away from the real-world XR position where they were set.
     const floorMarkerWorldPosition = new THREE.Vector3(0, 0.006, 0);
     const ceilingMarkerWorldPosition = new THREE.Vector3(0, 2.194, 0);
     const markerWorldScratch = new THREE.Vector3();
@@ -920,12 +922,17 @@
     let savedCeilingCutY = 2.2;
 
     function setFloorMarkerAnchorFromWorld(x, y, z) {
+      // Convert the controller's world position into markerAnchorRoot local space.
+      // Since markerAnchorRoot is inside cameraRig, the saved marker remains locked
+      // to the XR tracking-space point instead of the OBJ or the movable scene.
       markerAnchorRoot.updateMatrixWorld(true);
       markerWorldScratch.set(x, y + 0.006, z);
       floorMarkerWorldPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
     }
 
     function setCeilingMarkerAnchorFromWorld(x, y, z) {
+      // Same anchoring as the floor marker, but offset just below the ceiling plane
+      // so the red plane/ring is visible at the cut height.
       markerAnchorRoot.updateMatrixWorld(true);
       markerWorldScratch.set(x, y - 0.006, z);
       ceilingMarkerWorldPosition.copy(markerAnchorRoot.worldToLocal(markerWorldScratch));
@@ -2086,13 +2093,13 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Moving/raising/rotating the OBJ or using left-stick locomotion should not move them.`
         );
       } else {
         setStatus(
           `<span class="ok">VR mode active.</span>\n` +
           `To set a cut: put the <b>left controller</b> on the floor or at ceiling height, then press the <b>right trigger</b>.\n` +
-          `Green/red markers are fixed in XR tracking space and are separate from modelVerticalOffset. They fade out after being shown; press left Y to reveal them again. Moving the OBJ should not move them.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Moving/raising/rotating the OBJ or using left-stick locomotion should not move them.`
         );
       }
     });
