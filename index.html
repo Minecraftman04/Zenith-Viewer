@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 42</title>
+  <title>Quest OBJ Viewer version 43</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 42</h1>
+        <h1>Quest OBJ Viewer version 43</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -420,7 +420,7 @@
       <div class="control">
         <div>
           <b>Show tracked fake hands in XR</b><br />
-          <span>When Quest hand tracking is active, shows moving hand models. Make a fist with both hands together to cycle the visual style: Mesh → Boxes → Spheres. This cannot affect the OBJ or controls.</span>
+          <span>When Quest hand tracking is active, shows moving hand models. Each fake hand disappears automatically when you pick up that side's controller. Make a fist with both hands together to cycle the visual style: Mesh → Boxes → Spheres. This cannot affect the OBJ or controls.</span>
         </div>
         <input id="showHandsInput" type="checkbox" checked />
       </div>
@@ -500,7 +500,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands. Make a fist with both hands at the same time to change only their visual style (Mesh, Boxes, Spheres); they cannot affect the OBJ or controls. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Make a fist with both hands at the same time to change only their visual style (Mesh, Boxes, Spheres); they cannot affect the OBJ or controls. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -716,6 +716,43 @@
       return !!inputSource?.hand;
     }
 
+    function rememberHandSource(handRoot, index, event) {
+      const inputSource = event?.data || null;
+      handRoot.userData.index = index;
+      handRoot.userData.handedness = inputSource?.handedness || "unknown";
+      handRoot.userData.inputSource = inputSource;
+      updateHandVisuals();
+    }
+
+    function forgetHandSource(handRoot) {
+      handRoot.userData.handedness = "unknown";
+      handRoot.userData.inputSource = null;
+      updateHandVisuals();
+    }
+
+    // A hand object is only connected while Quest is actually using hand tracking.
+    // If a controller becomes active on the same side during the transition, hide
+    // that fake hand immediately instead of briefly showing hand and controller together.
+    function hasActiveControllerForHandedness(handedness) {
+      if (!handedness || handedness === "unknown") return false;
+
+      const session = renderer.xr.getSession();
+      if (!session) return false;
+
+      for (const source of session.inputSources) {
+        if (source.handedness === handedness && !isTrackedHandSource(source)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    hand1.addEventListener("connected", (event) => rememberHandSource(hand1, 0, event));
+    hand2.addEventListener("connected", (event) => rememberHandSource(hand2, 1, event));
+    hand1.addEventListener("disconnected", () => forgetHandSource(hand1));
+    hand2.addEventListener("disconnected", () => forgetHandSource(hand2));
+
     // A fist is detected from tracked WebXR finger joints only for selecting the
     // displayed fake-hand style. It is not connected to any OBJ interaction code.
     const FIST_FINGERS = [
@@ -861,13 +898,23 @@
     }
 
     function updateHandVisuals() {
-      const show = renderer.xr.isPresenting && showHandsInput.checked;
+      const allowHands = renderer.xr.isPresenting && showHandsInput.checked;
 
       handRoots.forEach((handRoot, handIndex) => {
-        handRoot.visible = show;
+        const source = handRoot.userData.inputSource || null;
+        const handedness = source?.handedness || handRoot.userData.handedness || "unknown";
+
+        // Only render a fake hand while a real tracked-hand source exists. If the
+        // matching Touch controller is picked up/activated, hide that side at once.
+        const showThisHand =
+          allowHands &&
+          isTrackedHandSource(source) &&
+          !hasActiveControllerForHandedness(handedness);
+
+        handRoot.visible = showThisHand;
 
         handModels[handIndex].forEach((model, modelIndex) => {
-          model.visible = show && modelIndex === currentHandModelStyleIndex;
+          model.visible = showThisHand && modelIndex === currentHandModelStyleIndex;
         });
       });
     }
@@ -902,6 +949,7 @@
       if (ray.material && ray.material.color) ray.material.color.setHex(color);
 
       updateControllerVisuals();
+      updateHandVisuals();
     }
 
     controller1.addEventListener("connected", (event) => rememberControllerSide(controller1, controllerGrip1, controllerRay1, 0, event));
@@ -913,6 +961,7 @@
       grip.userData.handedness = "unknown";
       grip.userData.inputSource = null;
       updateControllerVisuals();
+      updateHandVisuals();
     }
 
     controller1.addEventListener("disconnected", () => forgetControllerSide(controller1, controllerGrip1));
@@ -2514,7 +2563,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls.`
         );
       } else {
         setStatus(
@@ -2522,7 +2571,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
