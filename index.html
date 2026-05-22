@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 44</title>
+  <title>Quest OBJ Viewer version 43</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 44</h1>
+        <h1>Quest OBJ Viewer version 43</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -427,14 +427,6 @@
 
       <div class="control">
         <div>
-          <b>Show full body tracking skeleton in XR</b><br />
-          <span>Uses the Quest/WebXR <b>body-tracking</b> feature when available to display your torso, arms, legs and feet. Meta estimates the body pose from the headset and hands/controllers. Visual only: it never affects the OBJ or controls. Quest Browser may require its WebXR Experiments flag.</span>
-        </div>
-        <input id="showBodyInput" type="checkbox" checked />
-      </div>
-
-      <div class="control">
-        <div>
           <b>Right-stick spin axis</b><br />
           <span>Use Auto for rockets. It picks the model’s longest local axis. If it spins wrong, try X, Y, or Z.</span>
         </div>
@@ -508,7 +500,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Make a fist with both hands at the same time to change only their visual style (Mesh, Boxes, Spheres); they cannot affect the OBJ or controls. When the Quest Browser exposes WebXR body tracking, the full-body skeleton shows the inferred torso, arms, legs and feet; it is also display-only. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Make a fist with both hands at the same time to change only their visual style (Mesh, Boxes, Spheres); they cannot affect the OBJ or controls. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -550,7 +542,6 @@
     const moveInput = document.getElementById("moveInput");
     const showControllersInput = document.getElementById("showControllersInput");
     const showHandsInput = document.getElementById("showHandsInput");
-    const showBodyInput = document.getElementById("showBodyInput");
     const spinAxisInput = document.getElementById("spinAxisInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
     const arFloorInput = document.getElementById("arFloorInput");
@@ -582,9 +573,7 @@
     renderer.toneMappingExposure = 1.0;
     document.body.appendChild(renderer.domElement);
 
-    // Body tracking is optional: unsupported browsers can still enter XR normally.
-    // When supported, frame.body exposes the articulated Quest/WebXR body skeleton.
-    const xrOptionalFeatures = ["local-floor", "bounded-floor", "hand-tracking", "body-tracking"];
+    const xrOptionalFeatures = ["local-floor", "bounded-floor", "hand-tracking"];
 
     const vrButton = VRButton.createButton(renderer, {
       optionalFeatures: xrOptionalFeatures
@@ -698,213 +687,6 @@
         handModels[handIndex].push(model);
       });
     });
-
-    // Native WebXR body tracking visualisation. This uses frame.body only when the
-    // headset/browser grants the optional "body-tracking" feature. The skeleton is
-    // intentionally display-only and is never read by OBJ movement or XR controls.
-    const trackedBodyRoot = new THREE.Group();
-    trackedBodyRoot.name = "tracked_body_visual_only";
-    trackedBodyRoot.visible = false;
-    scene.add(trackedBodyRoot);
-
-    const BODY_DISPLAY_JOINTS = [
-      "neck", "chest", "spine-upper", "spine-middle", "spine-lower", "hips",
-      "left-shoulder", "left-arm-upper", "left-arm-lower", "left-hand-wrist-twist",
-      "right-shoulder", "right-arm-upper", "right-arm-lower", "right-hand-wrist-twist",
-      "left-upper-leg", "left-lower-leg", "left-foot-ankle", "left-foot-ball",
-      "right-upper-leg", "right-lower-leg", "right-foot-ankle", "right-foot-ball"
-    ];
-
-    const BODY_DISPLAY_BONES = [
-      ["neck", "chest"],
-      ["chest", "spine-upper"],
-      ["spine-upper", "spine-middle"],
-      ["spine-middle", "spine-lower"],
-      ["spine-lower", "hips"],
-      ["chest", "left-shoulder"],
-      ["left-shoulder", "left-arm-upper"],
-      ["left-arm-upper", "left-arm-lower"],
-      ["left-arm-lower", "left-hand-wrist-twist"],
-      ["chest", "right-shoulder"],
-      ["right-shoulder", "right-arm-upper"],
-      ["right-arm-upper", "right-arm-lower"],
-      ["right-arm-lower", "right-hand-wrist-twist"],
-      ["hips", "left-upper-leg"],
-      ["left-upper-leg", "left-lower-leg"],
-      ["left-lower-leg", "left-foot-ankle"],
-      ["left-foot-ankle", "left-foot-ball"],
-      ["hips", "right-upper-leg"],
-      ["right-upper-leg", "right-lower-leg"],
-      ["right-lower-leg", "right-foot-ankle"],
-      ["right-foot-ankle", "right-foot-ball"]
-    ];
-
-    const bodyJointMaterial = new THREE.MeshBasicMaterial({
-      color: 0x7cc7ff,
-      transparent: true,
-      opacity: 0.82,
-      depthWrite: false
-    });
-    const bodyBoneMaterial = new THREE.MeshBasicMaterial({
-      color: 0x7cc7ff,
-      transparent: true,
-      opacity: 0.48,
-      depthWrite: false
-    });
-    const bodyJointMeshes = new Map();
-    const bodyBoneMeshes = [];
-    const bodyBoneDirection = new THREE.Vector3();
-    const bodyBoneMidpoint = new THREE.Vector3();
-    const bodyBoneUp = new THREE.Vector3(0, 1, 0);
-    let bodyTrackingMissingFrames = 0;
-    let bodyTrackingActiveNotified = false;
-    let bodyTrackingUnavailableNotified = false;
-
-    BODY_DISPLAY_JOINTS.forEach((jointName) => {
-      const isCore = ["neck", "chest", "spine-upper", "spine-middle", "spine-lower", "hips"].includes(jointName);
-      const isFoot = jointName.includes("foot");
-      const radius = isCore ? 0.032 : isFoot ? 0.021 : 0.025;
-      const joint = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), bodyJointMaterial);
-      joint.name = `body_joint_${jointName}`;
-      joint.visible = false;
-      joint.renderOrder = 6;
-      trackedBodyRoot.add(joint);
-      bodyJointMeshes.set(jointName, joint);
-    });
-
-    BODY_DISPLAY_BONES.forEach(([fromName, toName]) => {
-      const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1, 8), bodyBoneMaterial);
-      bone.name = `body_bone_${fromName}_${toName}`;
-      bone.visible = false;
-      bone.renderOrder = 5;
-      trackedBodyRoot.add(bone);
-      bodyBoneMeshes.push({ fromName, toName, bone });
-    });
-
-    function hideTrackedBodyVisual() {
-      trackedBodyRoot.visible = false;
-      bodyJointMeshes.forEach((joint) => {
-        joint.visible = false;
-      });
-      bodyBoneMeshes.forEach(({ bone }) => {
-        bone.visible = false;
-      });
-    }
-
-    function resetBodyTrackingState() {
-      bodyTrackingMissingFrames = 0;
-      bodyTrackingActiveNotified = false;
-      bodyTrackingUnavailableNotified = false;
-      hideTrackedBodyVisual();
-    }
-
-    function getWebXRBodyJointSpace(body, jointName) {
-      if (!body) return null;
-
-      try {
-        if (typeof body.get === "function") {
-          return body.get(jointName) || null;
-        }
-      } catch (_) {
-        // Fall through for older experimental implementations.
-      }
-
-      return body.joints?.get?.(jointName) || body.joints?.[jointName] || null;
-    }
-
-    function updateTrackedBodyVisual(frame) {
-      hideTrackedBodyVisual();
-
-      if (!renderer.xr.isPresenting || !showBodyInput.checked || !frame) {
-        return;
-      }
-
-      // WebXR Body Tracking Module: XRFrame.body exists only after the optional
-      // feature is granted. If it is absent, keep the viewer fully functional.
-      const body = frame.body || null;
-
-      if (!body) {
-        bodyTrackingMissingFrames += 1;
-
-        if (bodyTrackingMissingFrames > 90 && !bodyTrackingUnavailableNotified) {
-          bodyTrackingUnavailableNotified = true;
-          showARConfirmation("BODY TRACKING UNAVAILABLE");
-          setStatus(
-            `<span class="err">Full body tracking is not available in this XR session.</span>\n` +
-            `The viewer requested the WebXR <b>body-tracking</b> feature, but the browser did not expose it. On Quest Browser, try enabling the WebXR Experiments flag and reload this page. Hands/controllers still work normally.`
-          );
-        }
-        return;
-      }
-
-      const referenceSpace = renderer.xr.getReferenceSpace();
-      if (!referenceSpace) return;
-
-      bodyTrackingMissingFrames = 0;
-      let visibleJointCount = 0;
-
-      BODY_DISPLAY_JOINTS.forEach((jointName) => {
-        const jointMesh = bodyJointMeshes.get(jointName);
-        const jointSpace = getWebXRBodyJointSpace(body, jointName);
-        let pose = null;
-
-        try {
-          pose = jointSpace ? frame.getPose(jointSpace, referenceSpace) : null;
-        } catch (_) {
-          pose = null;
-        }
-
-        const p = pose?.transform?.position;
-        if (!jointMesh || !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) {
-          if (jointMesh) jointMesh.visible = false;
-          return;
-        }
-
-        jointMesh.position.set(p.x, p.y, p.z);
-        jointMesh.visible = true;
-        visibleJointCount += 1;
-      });
-
-      if (visibleJointCount < 4) {
-        return;
-      }
-
-      bodyBoneMeshes.forEach(({ fromName, toName, bone }) => {
-        const from = bodyJointMeshes.get(fromName);
-        const to = bodyJointMeshes.get(toName);
-
-        if (!from?.visible || !to?.visible) {
-          bone.visible = false;
-          return;
-        }
-
-        bodyBoneDirection.subVectors(to.position, from.position);
-        const length = bodyBoneDirection.length();
-
-        if (!Number.isFinite(length) || length < 0.001) {
-          bone.visible = false;
-          return;
-        }
-
-        bodyBoneMidpoint.copy(from.position).add(to.position).multiplyScalar(0.5);
-        bone.position.copy(bodyBoneMidpoint);
-        bone.quaternion.setFromUnitVectors(bodyBoneUp, bodyBoneDirection.normalize());
-        bone.scale.set(1, length, 1);
-        bone.visible = true;
-      });
-
-      trackedBodyRoot.visible = true;
-
-      if (!bodyTrackingActiveNotified) {
-        bodyTrackingActiveNotified = true;
-        bodyTrackingUnavailableNotified = false;
-        showARConfirmation("BODY TRACKING ACTIVE");
-        setStatus(
-          `<span class="ok">Full body skeleton active.</span>\n` +
-          `Quest/WebXR is providing a body pose for the visible torso, arms, legs and feet. Meta derives this pose from the headset and hands/controllers, so it is an inferred avatar body rather than external tracker data. It is visual-only and cannot affect the OBJ.`
-        );
-      }
-    }
 
     function makeControllerRay(color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -2723,16 +2505,6 @@
       updateHandVisuals();
       if (!showHandsInput.checked) resetBothFistGestureState();
     });
-    showBodyInput.addEventListener("change", () => {
-      if (!showBodyInput.checked) {
-        hideTrackedBodyVisual();
-        showARConfirmation("BODY HIDDEN");
-      } else if (renderer.xr.isPresenting) {
-        bodyTrackingMissingFrames = 0;
-        bodyTrackingUnavailableNotified = false;
-        showARConfirmation("BODY TRACKING REQUESTED");
-      }
-    });
     arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
     floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
     floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
@@ -2773,7 +2545,6 @@
       camera.position.set(0, 0, 0);
       cameraRig.position.set(0, 0, 0);
       resetBothFistGestureState();
-      resetBodyTrackingState();
       updateControllerVisuals();
       updateHandVisuals();
 
@@ -2792,7 +2563,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. If supported by Quest Browser, the display-only full-body skeleton follows the inferred WebXR body pose.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls.`
         );
       } else {
         setStatus(
@@ -2800,7 +2571,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. If supported by Quest Browser, the display-only full-body skeleton follows the inferred WebXR body pose. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands disappear when a matching controller becomes active and can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -2836,7 +2607,6 @@
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
       resetBothFistGestureState();
-      resetBodyTrackingState();
       setMarkerOpacity(floorMarker, 0);
       setMarkerOpacity(ceilingMarker, 0);
       floorMarker.visible = false;
@@ -2857,7 +2627,6 @@
         autoDetectXRFloor();
         updateControllerVisuals();
         updateHandVisuals();
-        updateTrackedBodyVisual(frame);
         updateBothFistHandModelGesture(dt);
         updateMarkerReveal(dt);
         if (xrCutArmTimer > 0) {
@@ -2867,7 +2636,6 @@
         markerRevealTimer = 0;
         xrCutArmTimer = 0;
         resetBothFistGestureState();
-        hideTrackedBodyVisual();
       }
 
       if (arConfirmTimer > 0) {
