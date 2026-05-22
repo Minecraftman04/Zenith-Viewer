@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 49</title>
+  <title>Quest OBJ Viewer version 50</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 49</h1>
+        <h1>Quest OBJ Viewer version 50</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -404,12 +404,14 @@
       <div class="control">
         <div>
           <b>Vertical height ruler</b><br />
-          <span>Normally off. Shows a true-size 1 m or 2 m ruler to the right of the OBJ as you look at it. Its zero end stays on the floor for height comparison.</span>
+          <span>Normally off. Shows a true-size ruler to the right of the OBJ as you look at it. Choose 1 m, 2 m, current floor-to-ceiling height, or the loaded model’s full length. Its zero end stays on the floor.</span>
         </div>
         <select id="heightRulerInput">
           <option value="off" selected>Off</option>
           <option value="1">1 m ruler</option>
           <option value="2">2 m ruler</option>
+          <option value="ceiling">Floor to ceiling</option>
+          <option value="model">Loaded model full length</option>
         </select>
       </div>
 
@@ -1294,7 +1296,7 @@
     scene.add(grid);
 
     // Optional floor-standing height ruler. One Three.js world unit is one metre,
-    // so both ruler options remain true-size alongside the mm-to-metre OBJ scale.
+    // so fixed and adaptive ruler options remain true-size beside the mm-to-metre OBJ scale.
     const heightRuler = new THREE.Group();
     heightRuler.name = "vertical_height_ruler";
     heightRuler.visible = false;
@@ -1309,9 +1311,51 @@
     const rulerFacingMatrix = new THREE.Matrix4();
     let renderedRulerLength = 0;
 
+    function roundRulerLength(lengthMetres) {
+      // Millimetre precision gives a stable ruler length while the model is being rotated.
+      return Math.max(0, Math.round(Number(lengthMetres || 0) * 1000) / 1000);
+    }
+
+    function getRulerFloorY() {
+      return renderer.xr.isPresenting ? xrFloorY : 0;
+    }
+
     function getSelectedHeightRulerLength() {
-      const value = Number(heightRulerInput.value);
-      return value === 1 || value === 2 ? value : 0;
+      const mode = heightRulerInput.value;
+
+      if (mode === "1") return 1;
+      if (mode === "2") return 2;
+
+      if (mode === "ceiling") {
+        // Uses the current floor and saved AR ceiling cut. Before a ceiling is set,
+        // the existing default ceiling height is shown and updates immediately once calibrated.
+        return roundRulerLength(Math.max(0, savedCeilingCutY - getRulerFloorY()));
+      }
+
+      if (mode === "model" && modelInfo.loaded) {
+        // Full length means the loaded model's longest true-size dimension.
+        return roundRulerLength(modelInfo.maxDim);
+      }
+
+      return 0;
+    }
+
+    function getHeightRulerStatusText() {
+      const mode = heightRulerInput.value;
+      const length = getSelectedHeightRulerLength();
+
+      if (mode === "off") return "off";
+      if (mode === "1" || mode === "2") return `${mode} m (floor-based)`;
+      if (mode === "ceiling") {
+        const calibrationHint = renderer.xr.isPresenting && isPassthroughAR && !xrCeilingManual
+          ? ", set AR ceiling for exact height"
+          : "";
+        return `floor to ceiling (${length.toFixed(3)} m${calibrationHint})`;
+      }
+      if (mode === "model") {
+        return modelInfo.loaded ? `model full length (${length.toFixed(3)} m)` : "model full length (load an OBJ first)";
+      }
+      return "off";
     }
 
     function disposeHeightRulerContents() {
@@ -1326,15 +1370,24 @@
       }
     }
 
+    function formatRulerMetres(value, exactLengthLabel = false) {
+      if (exactLengthLabel && Math.abs(value * 10 - Math.round(value * 10)) > 0.0001) {
+        return `${value.toFixed(3)} m`;
+      }
+      return `${value.toFixed(1)} m`;
+    }
+
     function makeHeightRulerTexture(lengthMetres) {
       const canvas = document.createElement("canvas");
       canvas.width = 420;
-      canvas.height = lengthMetres === 2 ? 4096 : 2048;
+      canvas.height = Math.min(8192, Math.max(1024, Math.round(lengthMetres * 2048)));
       const ctx = canvas.getContext("2d");
       const width = canvas.width;
       const height = canvas.height;
       const pxPerMetre = height / lengthMetres;
-      const totalCentimetres = Math.round(lengthMetres * 100);
+      const totalWholeCentimetres = Math.floor(lengthMetres * 100 + 0.00001);
+      const endIsMajorMark = Math.abs(lengthMetres * 10 - Math.round(lengthMetres * 10)) < 0.0001;
+      const textSize = lengthMetres > 4 ? 34 : lengthMetres > 2 ? 38 : 44;
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "rgba(11, 13, 18, 0.90)";
@@ -1347,7 +1400,7 @@
       ctx.lineTo(24, height);
       ctx.stroke();
 
-      for (let cm = 0; cm <= totalCentimetres; cm += 1) {
+      for (let cm = 0; cm <= totalWholeCentimetres; cm += 1) {
         const y = Math.round(height - (cm / 100) * pxPerMetre);
         const major = cm % 10 === 0;
         const half = !major && cm % 5 === 0;
@@ -1362,11 +1415,27 @@
 
         if (major) {
           ctx.fillStyle = "#f4f7fb";
-          ctx.font = `700 ${lengthMetres === 2 ? 42 : 44}px system-ui, sans-serif`;
+          ctx.font = `700 ${textSize}px system-ui, sans-serif`;
           ctx.textAlign = "left";
-          ctx.textBaseline = cm === 0 ? "bottom" : cm === totalCentimetres ? "top" : "middle";
-          ctx.fillText(`${(cm / 100).toFixed(1)} m`, 156, y);
+          ctx.textBaseline = cm === 0 ? "bottom" : (Math.abs(cm / 100 - lengthMetres) < 0.0001 ? "top" : "middle");
+          ctx.fillText(formatRulerMetres(cm / 100), 156, y);
         }
+      }
+
+      // Adaptive rulers can end between 10 cm labels. Draw a precise top cap so
+      // the ruler's visible full height always equals the ceiling or model length.
+      if (!endIsMajorMark) {
+        ctx.strokeStyle = "rgba(150, 240, 177, 0.98)";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(24, 3);
+        ctx.lineTo(146, 3);
+        ctx.stroke();
+        ctx.fillStyle = "#96f0b1";
+        ctx.font = `700 ${textSize}px system-ui, sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(formatRulerMetres(lengthMetres, true), 156, 7);
       }
 
       const texture = new THREE.CanvasTexture(canvas);
@@ -1415,12 +1484,19 @@
     function updateHeightRuler() {
       const chosenLength = getSelectedHeightRulerLength();
 
-      if (!chosenLength || chosenLength !== renderedRulerLength || !currentObject || !modelInfo.loaded) {
+      if (!chosenLength || !currentObject || !modelInfo.loaded) {
         heightRuler.visible = false;
         return;
       }
 
-      const floorY = renderer.xr.isPresenting ? xrFloorY : 0;
+      // Floor-to-ceiling and model-length rulers change dynamically after floor/
+      // ceiling calibration, model loading, or transforms; regenerate to match exactly.
+      if (Math.abs(chosenLength - renderedRulerLength) >= 0.0005) {
+        rebuildHeightRuler();
+        return;
+      }
+
+      const floorY = getRulerFloorY();
       const viewCamera = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera;
       viewCamera.updateMatrixWorld(true);
       viewCamera.getWorldPosition(rulerCameraPosition);
@@ -1902,7 +1978,7 @@
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
-        `Vertical height ruler: ${heightRulerInput.value === "off" ? "off" : heightRulerInput.value + " m (floor-based)"}\n` +
+        `Vertical height ruler: ${getHeightRulerStatusText()}\n` +
         `${getClippingStatusLine()}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
