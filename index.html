@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 38</title>
+  <title>Quest OBJ Viewer version 39</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 38</h1>
+        <h1>Quest OBJ Viewer version 39</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -670,52 +670,17 @@
       return line;
     }
 
-    function makeGripMarker(color) {
-      const group = new THREE.Group();
-
-      const body = new THREE.Mesh(
-        new THREE.SphereGeometry(0.035, 18, 12),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.85
-        })
-      );
-      group.add(body);
-
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.045, 0.006, 10, 28),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.9
-        })
-      );
-      ring.rotation.x = Math.PI / 2;
-      group.add(ring);
-
-      group.name = "controller_grip_marker";
-      group.visible = false;
-      return group;
-    }
-
     const controllerRay1 = makeControllerRay(0x7cc7ff);
     const controllerRay2 = makeControllerRay(0x96f0b1);
     controller1.add(controllerRay1);
     controller2.add(controllerRay2);
 
-    const gripMarker1 = makeGripMarker(0x7cc7ff);
-    const gripMarker2 = makeGripMarker(0x96f0b1);
-    controllerGrip1.add(gripMarker1);
-    controllerGrip2.add(gripMarker2);
 
     const xrControllerVisuals = [
       controllerModel1,
       controllerModel2,
       controllerRay1,
-      controllerRay2,
-      gripMarker1,
-      gripMarker2
+      controllerRay2
     ];
 
     function updateControllerVisuals() {
@@ -725,7 +690,7 @@
       }
     }
 
-    function rememberControllerSide(controller, grip, marker, ray, index, event) {
+    function rememberControllerSide(controller, grip, ray, index, event) {
       const inputSource = event?.data || null;
       const handedness = inputSource?.handedness || "unknown";
       controller.userData.index = index;
@@ -737,17 +702,14 @@
 
       const color = handedness === "left" ? 0x7cc7ff : handedness === "right" ? 0x96f0b1 : 0xffd27c;
 
-      marker.traverse((child) => {
-        if (child.material && child.material.color) child.material.color.setHex(color);
-      });
 
       if (ray.material && ray.material.color) ray.material.color.setHex(color);
 
       updateControllerVisuals();
     }
 
-    controller1.addEventListener("connected", (event) => rememberControllerSide(controller1, controllerGrip1, gripMarker1, controllerRay1, 0, event));
-    controller2.addEventListener("connected", (event) => rememberControllerSide(controller2, controllerGrip2, gripMarker2, controllerRay2, 1, event));
+    controller1.addEventListener("connected", (event) => rememberControllerSide(controller1, controllerGrip1, controllerRay1, 0, event));
+    controller2.addEventListener("connected", (event) => rememberControllerSide(controller2, controllerGrip2, controllerRay2, 1, event));
 
     function forgetControllerSide(controller, grip) {
       controller.userData.handedness = "unknown";
