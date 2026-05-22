@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 48</title>
+  <title>Quest OBJ Viewer version 49</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 48</h1>
+        <h1>Quest OBJ Viewer version 49</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -399,6 +399,18 @@
           <span>Each large grid square is 1 metre.</span>
         </div>
         <input id="gridInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Vertical height ruler</b><br />
+          <span>Normally off. Shows a true-size 1 m or 2 m ruler to the right of the OBJ as you look at it. Its zero end stays on the floor for height comparison.</span>
+        </div>
+        <select id="heightRulerInput">
+          <option value="off" selected>Off</option>
+          <option value="1">1 m ruler</option>
+          <option value="2">2 m ruler</option>
+        </select>
       </div>
 
       <div class="control">
@@ -563,6 +575,7 @@
     const floorInput = document.getElementById("floorInput");
     const heightModeInput = document.getElementById("heightModeInput");
     const gridInput = document.getElementById("gridInput");
+    const heightRulerInput = document.getElementById("heightRulerInput");
     const moveInput = document.getElementById("moveInput");
     const showControllersInput = document.getElementById("showControllersInput");
     const showHandsInput = document.getElementById("showHandsInput");
@@ -1280,6 +1293,168 @@
     grid.position.y = 0.001;
     scene.add(grid);
 
+    // Optional floor-standing height ruler. One Three.js world unit is one metre,
+    // so both ruler options remain true-size alongside the mm-to-metre OBJ scale.
+    const heightRuler = new THREE.Group();
+    heightRuler.name = "vertical_height_ruler";
+    heightRuler.visible = false;
+    scene.add(heightRuler);
+
+    const RULER_WORLD_WIDTH = 0.20;
+    const RULER_UP = new THREE.Vector3(0, 1, 0);
+    const rulerCameraPosition = new THREE.Vector3();
+    const rulerTowardViewer = new THREE.Vector3();
+    const rulerRightFromViewer = new THREE.Vector3();
+    const rulerFloorAnchor = new THREE.Vector3();
+    const rulerFacingMatrix = new THREE.Matrix4();
+    let renderedRulerLength = 0;
+
+    function getSelectedHeightRulerLength() {
+      const value = Number(heightRulerInput.value);
+      return value === 1 || value === 2 ? value : 0;
+    }
+
+    function disposeHeightRulerContents() {
+      while (heightRuler.children.length) {
+        const child = heightRuler.children.pop();
+        child.geometry?.dispose?.();
+        const materials = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+        materials.forEach((material) => {
+          material?.map?.dispose?.();
+          material?.dispose?.();
+        });
+      }
+    }
+
+    function makeHeightRulerTexture(lengthMetres) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 420;
+      canvas.height = lengthMetres === 2 ? 4096 : 2048;
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+      const pxPerMetre = height / lengthMetres;
+      const totalCentimetres = Math.round(lengthMetres * 100);
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "rgba(11, 13, 18, 0.90)";
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "rgba(124, 199, 255, 0.98)";
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(24, 0);
+      ctx.lineTo(24, height);
+      ctx.stroke();
+
+      for (let cm = 0; cm <= totalCentimetres; cm += 1) {
+        const y = Math.round(height - (cm / 100) * pxPerMetre);
+        const major = cm % 10 === 0;
+        const half = !major && cm % 5 === 0;
+        const tickLength = major ? 114 : half ? 78 : 46;
+
+        ctx.strokeStyle = major ? "rgba(244, 247, 251, 0.98)" : "rgba(183, 192, 209, 0.86)";
+        ctx.lineWidth = major ? 7 : half ? 5 : 3;
+        ctx.beginPath();
+        ctx.moveTo(24, y);
+        ctx.lineTo(24 + tickLength, y);
+        ctx.stroke();
+
+        if (major) {
+          ctx.fillStyle = "#f4f7fb";
+          ctx.font = `700 ${lengthMetres === 2 ? 42 : 44}px system-ui, sans-serif`;
+          ctx.textAlign = "left";
+          ctx.textBaseline = cm === 0 ? "bottom" : cm === totalCentimetres ? "top" : "middle";
+          ctx.fillText(`${(cm / 100).toFixed(1)} m`, 156, y);
+        }
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      return texture;
+    }
+
+    function rebuildHeightRuler() {
+      disposeHeightRulerContents();
+      renderedRulerLength = getSelectedHeightRulerLength();
+
+      if (!renderedRulerLength) {
+        heightRuler.visible = false;
+        return;
+      }
+
+      const face = new THREE.Mesh(
+        new THREE.PlaneGeometry(RULER_WORLD_WIDTH, renderedRulerLength),
+        new THREE.MeshBasicMaterial({
+          map: makeHeightRulerTexture(renderedRulerLength),
+          transparent: true,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        })
+      );
+      face.position.set(RULER_WORLD_WIDTH / 2, renderedRulerLength / 2, 0);
+      heightRuler.add(face);
+
+      const baseFoot = new THREE.Mesh(
+        new THREE.BoxGeometry(RULER_WORLD_WIDTH + 0.035, 0.008, 0.008),
+        new THREE.MeshBasicMaterial({
+          color: 0x96f0b1,
+          transparent: true,
+          opacity: 0.98,
+          depthWrite: false
+        })
+      );
+      baseFoot.position.set((RULER_WORLD_WIDTH - 0.035) / 2, 0.004, 0.003);
+      heightRuler.add(baseFoot);
+
+      updateHeightRuler();
+    }
+
+    function updateHeightRuler() {
+      const chosenLength = getSelectedHeightRulerLength();
+
+      if (!chosenLength || chosenLength !== renderedRulerLength || !currentObject || !modelInfo.loaded) {
+        heightRuler.visible = false;
+        return;
+      }
+
+      const floorY = renderer.xr.isPresenting ? xrFloorY : 0;
+      const viewCamera = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera;
+      viewCamera.updateMatrixWorld(true);
+      viewCamera.getWorldPosition(rulerCameraPosition);
+
+      // Use a horizontal camera-to-model vector so the ruler stays upright and
+      // appears on the viewer's right, rather than leaning toward the headset.
+      rulerFloorAnchor.set(modelInfo.center.x, floorY, modelInfo.center.z);
+      rulerTowardViewer.subVectors(rulerCameraPosition, rulerFloorAnchor);
+      rulerTowardViewer.y = 0;
+
+      if (rulerTowardViewer.lengthSq() < 0.000001) {
+        rulerTowardViewer.set(0, 0, 1);
+      } else {
+        rulerTowardViewer.normalize();
+      }
+
+      rulerRightFromViewer.crossVectors(RULER_UP, rulerTowardViewer).normalize();
+
+      // Offset beyond the model's visible horizontal bounding width, with a
+      // small air gap. The ruler follows OBJ X/Z movement but not its height:
+      // its zero point remains on the real/virtual calibrated floor.
+      const halfProjectedWidth =
+        Math.abs(rulerRightFromViewer.x) * modelInfo.size.x * 0.5 +
+        Math.abs(rulerRightFromViewer.z) * modelInfo.size.z * 0.5;
+      const gap = THREE.MathUtils.clamp(modelInfo.maxDim * 0.12, 0.06, 0.18);
+
+      rulerFloorAnchor.addScaledVector(rulerRightFromViewer, halfProjectedWidth + gap);
+      heightRuler.position.copy(rulerFloorAnchor);
+
+      rulerFacingMatrix.makeBasis(rulerRightFromViewer, RULER_UP, rulerTowardViewer);
+      heightRuler.quaternion.setFromRotationMatrix(rulerFacingMatrix);
+      heightRuler.visible = true;
+    }
+
     // Visible confirmation marker for XR/AR floor calibration.
     const floorMarker = new THREE.Group();
     floorMarker.visible = false;
@@ -1518,6 +1693,7 @@
       modelRoot.remove(currentObject);
       currentObject = null;
       modelInfo.loaded = false;
+      updateHeightRuler();
     }
 
     function normaliseFileName(name) {
@@ -1726,6 +1902,7 @@
         `Scale: ${scale}  |  Units: mm → metres\n` +
         `Viewing height: ${renderer.xr.isPresenting ? "XR calibrated floor" : escapeHTML(heightModeInput.options[heightModeInput.selectedIndex].text)}\n` +
         `Longest axis vertical: ${longestAxisVerticalInput.checked ? "on (" + autoVerticalAxis.toUpperCase() + " → Z)" : "off"}\n` +
+        `Vertical height ruler: ${heightRulerInput.value === "off" ? "off" : heightRulerInput.value + " m (floor-based)"}\n` +
         `${getClippingStatusLine()}\n` +
         `Approx. size: ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m\n` +
         `For a ~30 cm model, try <b>Top at head height</b>, then walk around it in VR.`
@@ -2728,6 +2905,10 @@
       resetView();
     });
     gridInput.addEventListener("change", updateGrid);
+    heightRulerInput.addEventListener("change", () => {
+      rebuildHeightRuler();
+      reframeCurrentModel(false);
+    });
 
     scaleInput.addEventListener("input", () => {
       forceLockedScale();
@@ -2954,11 +3135,13 @@
         controls.update();
       }
 
+      updateHeightRuler();
       renderer.render(scene, camera);
     });
 
     forceLockedScale();
     updateGrid();
+    rebuildHeightRuler();
     updateRotationReadout();
     resetView();
 
