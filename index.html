@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 49</title>
+  <title>Quest OBJ Viewer version 50</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 49</h1>
+        <h1>Quest OBJ Viewer version 50</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -473,7 +473,7 @@
       <div class="control">
         <div>
           <b>Automatic AR floor placement</b><br />
-          <span>In passthrough, the model is automatically placed onto the detected real floor. Manual floor adjustment remains available below as an override.</span>
+          <span>In passthrough, the model is automatically placed onto the detected real floor. After a floor is captured, press <b>B</b> on the right controller to show or hide a translucent captured-floor overlay. Manual floor adjustment remains available below as an override.</span>
         </div>
         <input id="arFloorInput" type="checkbox" checked />
       </div>
@@ -524,7 +524,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Right controller B shows or hides the captured AR floor overlay after the floor has been detected or manually set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -1323,6 +1323,54 @@
     floorStem.position.y = 0.225;
     floorMarker.add(floorStem);
 
+    // Optional visualisation of the captured passthrough floor. Unlike the small
+    // floor calibration marker shown with Y, this gives a broad translucent patch
+    // at the saved AR floor height and stays visible until right-controller B is
+    // pressed again.
+    const capturedFloorVisual = new THREE.Group();
+    capturedFloorVisual.name = "captured_ar_floor_visual";
+    capturedFloorVisual.visible = false;
+    markerAnchorRoot.add(capturedFloorVisual);
+
+    const capturedFloorDisc = new THREE.Mesh(
+      new THREE.CircleGeometry(0.75, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x7cc7ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.13,
+        depthWrite: false
+      })
+    );
+    capturedFloorDisc.rotation.x = -Math.PI / 2;
+    capturedFloorVisual.add(capturedFloorDisc);
+
+    const capturedFloorOutline = new THREE.Mesh(
+      new THREE.RingGeometry(0.735, 0.75, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x7cc7ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.94,
+        depthWrite: false
+      })
+    );
+    capturedFloorOutline.rotation.x = -Math.PI / 2;
+    capturedFloorOutline.position.y = 0.002;
+    capturedFloorVisual.add(capturedFloorOutline);
+
+    const capturedFloorGrid = new THREE.GridHelper(1.5, 12, 0x7cc7ff, 0x7cc7ff);
+    capturedFloorGrid.position.y = 0.003;
+    const capturedFloorGridMaterials = Array.isArray(capturedFloorGrid.material)
+      ? capturedFloorGrid.material
+      : [capturedFloorGrid.material];
+    capturedFloorGridMaterials.forEach((material) => {
+      material.transparent = true;
+      material.opacity = 0.38;
+      material.depthWrite = false;
+    });
+    capturedFloorVisual.add(capturedFloorGrid);
+
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
     markerAnchorRoot.add(ceilingMarker);
@@ -1430,6 +1478,9 @@
     let xrCeilingManual = false;
     let xrCeilingMarkerX = 0;
     let xrCeilingMarkerZ = 0;
+    let capturedFloorAvailable = false;
+    let capturedFloorVisible = false;
+    let rightBButtonWasPressed = false;
 
     // Fixed marker anchors stored in markerAnchorRoot local space.
     // These are changed only when you set/nudge the floor or ceiling.
@@ -2062,6 +2113,54 @@
       floorMarker.updateMatrixWorld(true);
     }
 
+    function updateCapturedFloorVisual() {
+      capturedFloorVisual.visible =
+        renderer.xr.isPresenting &&
+        isPassthroughAR &&
+        capturedFloorAvailable &&
+        capturedFloorVisible;
+
+      // The captured-floor patch uses the saved floor anchor and is independent
+      // of OBJ movement, height adjustments, rotation and hand interactions.
+      capturedFloorVisual.position.copy(floorMarkerWorldPosition);
+      capturedFloorVisual.updateMatrixWorld(true);
+    }
+
+    function toggleCapturedFloor(showMessage = true) {
+      if (!renderer.xr.isPresenting || !isPassthroughAR) {
+        if (showMessage) {
+          showARConfirmation("AR ONLY");
+          setStatus(
+            `<span class="err">Captured-floor display is only available in passthrough/AR.</span>\n` +
+            `Enter passthrough and wait for a real floor to be detected, then press the right controller <b>B</b> button.`
+          );
+        }
+        return;
+      }
+
+      if (!capturedFloorAvailable) {
+        if (showMessage) {
+          showARConfirmation("NO FLOOR CAPTURED");
+          setStatus(
+            `<span class="err">No AR floor has been captured yet.</span>\n` +
+            `Look towards an open area of floor, or set it using the manual floor override, then press right-controller <b>B</b>.`
+          );
+        }
+        return;
+      }
+
+      capturedFloorVisible = !capturedFloorVisible;
+      updateCapturedFloorVisual();
+
+      if (showMessage) {
+        showARConfirmation(capturedFloorVisible ? "CAPTURED FLOOR SHOWN" : "CAPTURED FLOOR HIDDEN");
+        setStatus(
+          `<span class="ok">Captured AR floor ${capturedFloorVisible ? "shown" : "hidden"}.</span>\n` +
+          `Press right-controller <b>B</b> again to ${capturedFloorVisible ? "hide" : "show"} the translucent floor overlay. The OBJ and saved floor height are unchanged.`
+        );
+      }
+    }
+
     function applyXRFloorPlacement() {
       updateGrid();
 
@@ -2072,6 +2171,7 @@
       updateClippingPlanes();
       updateFloorMarker(true);
       updateCeilingMarker(true);
+      updateCapturedFloorVisual();
     }
 
     function stopARFloorHitTest() {
@@ -2190,12 +2290,15 @@
 
         xrFloorAutoSet = true;
         arDetectedFloorLocked = true;
+        capturedFloorAvailable = true;
+        capturedFloorVisible = false;
         applyXRFloorPlacement();
         showARConfirmation("AR FLOOR DETECTED");
 
         setStatus(
           `<span class="ok">AR floor detected automatically.</span>\n` +
           `The bottom of the OBJ has been placed on the real detected floor in front of you. ` +
+          `Press right-controller <b>B</b> to show or hide the captured floor overlay. ` +
           `Use the manual floor override only if you need to correct the level.\n` +
           `You can now move the OBJ using the controller sticks or hand pinches.`
         );
@@ -2415,6 +2518,9 @@
       setFloorMarkerAnchorFromWorld(controllerPos.x, savedFloorCutY, controllerPos.z);
       xrFloorManual = true;
       xrFloorAutoSet = true;
+      if (isPassthroughAR) {
+        capturedFloorAvailable = true;
+      }
       applyXRFloorPlacement();
       triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR FLOOR SET" : "VR FLOOR SET");
@@ -2540,6 +2646,9 @@
       floorMarkerWorldPosition.y += delta;
       xrFloorManual = true;
       xrFloorAutoSet = true;
+      if (isPassthroughAR) {
+        capturedFloorAvailable = true;
+      }
       applyXRFloorPlacement();
       triggerMarkerReveal(false);
       showARConfirmation(isPassthroughAR ? "AR FLOOR ADJUSTED" : "VR FLOOR ADJUSTED");
@@ -2701,6 +2810,12 @@
       return isGamepadButtonPressed(gamepad, 4);
     }
 
+    function isRightBButtonPressed(gamepad) {
+      // Quest/Touch face button 2: B on the right controller.
+      // The equivalent left-controller button at this xr-standard index is Y.
+      return isGamepadButtonPressed(gamepad, 5);
+    }
+
     function armXRClipSetting(showMessage = true) {
       if (!renderer.xr.isPresenting) return;
 
@@ -2822,6 +2937,14 @@
         if (source.handedness === "right") {
           sawRightController = true;
 
+          // Right-controller B toggles a broad captured-floor overlay in AR only.
+          // It does not alter the detected floor height or reposition the OBJ.
+          const bPressed = isRightBButtonPressed(gp);
+          if (bPressed && !rightBButtonWasPressed) {
+            toggleCapturedFloor(true);
+          }
+          rightBButtonWasPressed = bPressed;
+
           // Pressing A arms the next right-trigger floor/ceiling cut confirmation.
           // Holding A while pressing the trigger also works because the trigger
           // handler checks the live A button state.
@@ -2850,6 +2973,7 @@
       if (!sawRightController) {
         rightStickWasPressed = false;
         rightAButtonWasPressed = false;
+        rightBButtonWasPressed = false;
       }
 
       if (!sawLeftController) {
@@ -2925,6 +3049,10 @@
       if (key === "y") {
         triggerMarkerReveal(true);
       }
+
+      if (key === "b") {
+        toggleCapturedFloor(true);
+      }
     });
 
     window.addEventListener("resize", () => {
@@ -2975,6 +3103,10 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       xrFloorY = 0;
+      capturedFloorAvailable = false;
+      capturedFloorVisible = false;
+      rightBButtonWasPressed = false;
+      updateCapturedFloorVisual();
 
       if (!isPassthroughAR) {
         xrCeilingManual = false;
@@ -3006,7 +3138,7 @@
 ` +
           `If automatic placement needs correcting, use the manual floor override with the left controller and right-controller A + trigger. To set an AR ceiling cut, hold the left controller at the desired cut height and confirm in the same way.
 ` +
-          `Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
+          `After the floor is captured, press right-controller <b>B</b> to show or hide its translucent floor overlay. Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
         );
       } else {
         setStatus(
@@ -3049,6 +3181,10 @@
       leftXButtonWasPressed = false;
       leftYButtonWasPressed = false;
       rightAButtonWasPressed = false;
+      rightBButtonWasPressed = false;
+      capturedFloorAvailable = false;
+      capturedFloorVisible = false;
+      capturedFloorVisual.visible = false;
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
       setMarkerOpacity(floorMarker, 0);
