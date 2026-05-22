@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 50</title>
+  <title>Quest OBJ Viewer version 51</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 50</h1>
+        <h1>Quest OBJ Viewer version 51</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -465,6 +465,14 @@
 
       <div class="control">
         <div>
+          <b>Measure between controllers</b><br />
+          <span>In VR/AR, squeeze and hold both controller grip buttons to display the live distance between the two controller pointing origins in millimetres. Release either grip to hide the measurement.</span>
+        </div>
+        <input id="measureControllersInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
           <b>Right-stick spin axis</b><br />
           <span>Use Auto for rockets. It picks the model’s longest local axis. If it spins wrong, try X, Y, or Z.</span>
         </div>
@@ -538,7 +546,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. With Touch controllers, squeeze and hold both grip buttons to draw a live controller-to-controller measurement line and readout in millimetres; release either grip to hide it. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -584,6 +592,7 @@
     const leftPinchCentreInput = document.getElementById("leftPinchCentreInput");
     const pinchMoveInput = document.getElementById("pinchMoveInput");
     const measureFingertipsInput = document.getElementById("measureFingertipsInput");
+    const measureControllersInput = document.getElementById("measureControllersInput");
     const spinAxisInput = document.getElementById("spinAxisInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
     const arFloorInput = document.getElementById("arFloorInput");
@@ -826,6 +835,68 @@
     const fingertipLabelPosition = new THREE.Vector3();
     let displayedFingertipMillimetres = null;
 
+    // Live controller measurement overlay. This is separate from hand-tracking
+    // measurement: squeeze and hold both controller grips to turn it on.
+    // Endpoints use each controller's WebXR target-ray origin, so the small dots
+    // visibly identify the two measurement reference points.
+    const controllerMeasurement = new THREE.Group();
+    controllerMeasurement.name = "controller_grip_measurement";
+    controllerMeasurement.visible = false;
+    scene.add(controllerMeasurement);
+
+    const controllerMeasureLinePositions = new Float32Array(6);
+    const controllerMeasureLineGeometry = new THREE.BufferGeometry();
+    controllerMeasureLineGeometry.setAttribute("position", new THREE.BufferAttribute(controllerMeasureLinePositions, 3));
+    const controllerMeasureLine = new THREE.Line(
+      controllerMeasureLineGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0xffd27c,
+        transparent: true,
+        opacity: 0.98,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+    controllerMeasureLine.frustumCulled = false;
+    controllerMeasureLine.renderOrder = 1003;
+    controllerMeasurement.add(controllerMeasureLine);
+
+    const controllerMeasureDotMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd27c,
+      transparent: true,
+      opacity: 0.99,
+      depthTest: false,
+      depthWrite: false
+    });
+    const leftControllerMeasureDot = new THREE.Mesh(new THREE.SphereGeometry(0.006, 16, 12), controllerMeasureDotMaterial);
+    const rightControllerMeasureDot = new THREE.Mesh(new THREE.SphereGeometry(0.006, 16, 12), controllerMeasureDotMaterial.clone());
+    leftControllerMeasureDot.renderOrder = 1004;
+    rightControllerMeasureDot.renderOrder = 1004;
+    controllerMeasurement.add(leftControllerMeasureDot, rightControllerMeasureDot);
+
+    const controllerMeasureLabelCanvas = document.createElement("canvas");
+    controllerMeasureLabelCanvas.width = 640;
+    controllerMeasureLabelCanvas.height = 128;
+    const controllerMeasureLabelContext = controllerMeasureLabelCanvas.getContext("2d");
+    const controllerMeasureLabelTexture = new THREE.CanvasTexture(controllerMeasureLabelCanvas);
+    controllerMeasureLabelTexture.colorSpace = THREE.SRGBColorSpace;
+    const controllerMeasureLabel = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: controllerMeasureLabelTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+    controllerMeasureLabel.scale.set(0.26, 0.052, 1);
+    controllerMeasureLabel.renderOrder = 1005;
+    controllerMeasurement.add(controllerMeasureLabel);
+
+    const leftControllerMeasurePosition = new THREE.Vector3();
+    const rightControllerMeasurePosition = new THREE.Vector3();
+    const controllerMeasureLabelPosition = new THREE.Vector3();
+    let displayedControllerMillimetres = null;
+
     // Left-hand pinch-to-centre state. While held, the model centre follows the
     // midpoint between the tracked left index fingertip and thumb tip.
     const LEFT_PINCH_START_DISTANCE = 0.024;
@@ -851,6 +922,11 @@
     function hideFingertipMeasurement() {
       fingertipMeasurement.visible = false;
       displayedFingertipMillimetres = null;
+    }
+
+    function hideControllerMeasurement() {
+      controllerMeasurement.visible = false;
+      displayedControllerMillimetres = null;
     }
 
     function getTrackedHandRoot(handedness) {
@@ -1140,6 +1216,91 @@
       fingertipMeasurement.visible = true;
     }
 
+    function drawControllerMeasurementLabel(millimetres) {
+      if (millimetres === displayedControllerMillimetres) return;
+      displayedControllerMillimetres = millimetres;
+
+      const ctx = controllerMeasureLabelContext;
+      const width = controllerMeasureLabelCanvas.width;
+      const height = controllerMeasureLabelCanvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.fillStyle = "rgba(11, 13, 18, 0.90)";
+      ctx.strokeStyle = "rgba(255, 210, 124, 0.98)";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.roundRect(5, 5, width - 10, height - 10, 30);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#f4f7fb";
+      ctx.font = "700 48px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`Controllers: ${millimetres} mm`, width / 2, height / 2 + 1);
+
+      controllerMeasureLabelTexture.needsUpdate = true;
+    }
+
+    function isControllerGripSqueezed(controller) {
+      const source = controller?.userData?.inputSource || null;
+      if (!source || isTrackedHandSource(source)) return false;
+
+      // WebXR's xr-standard mapping exposes the squeeze/grip input as button 1.
+      // Event state is retained as a fallback for runtimes that emit squeeze
+      // events reliably but report the analogue button value differently.
+      const gamepadGripHeld = isGamepadButtonPressed(source.gamepad, 1, 0.55);
+      return !!controller.userData.isSqueezing || gamepadGripHeld;
+    }
+
+    function updateControllerMeasurement() {
+      if (!renderer.xr.isPresenting || !measureControllersInput.checked) {
+        hideControllerMeasurement();
+        return;
+      }
+
+      const leftController = getControllerObjectByHand("left", false);
+      const rightController = getControllerObjectByHand("right", false);
+
+      if (
+        !leftController ||
+        !rightController ||
+        !isControllerGripSqueezed(leftController) ||
+        !isControllerGripSqueezed(rightController)
+      ) {
+        hideControllerMeasurement();
+        return;
+      }
+
+      leftController.updateMatrixWorld(true);
+      rightController.updateMatrixWorld(true);
+      leftController.getWorldPosition(leftControllerMeasurePosition);
+      rightController.getWorldPosition(rightControllerMeasurePosition);
+
+      if (
+        !Number.isFinite(leftControllerMeasurePosition.x) ||
+        !Number.isFinite(rightControllerMeasurePosition.x)
+      ) {
+        hideControllerMeasurement();
+        return;
+      }
+
+      const millimetres = Math.round(leftControllerMeasurePosition.distanceTo(rightControllerMeasurePosition) * 1000);
+      const positions = controllerMeasureLine.geometry.attributes.position;
+      positions.setXYZ(0, leftControllerMeasurePosition.x, leftControllerMeasurePosition.y, leftControllerMeasurePosition.z);
+      positions.setXYZ(1, rightControllerMeasurePosition.x, rightControllerMeasurePosition.y, rightControllerMeasurePosition.z);
+      positions.needsUpdate = true;
+
+      leftControllerMeasureDot.position.copy(leftControllerMeasurePosition);
+      rightControllerMeasureDot.position.copy(rightControllerMeasurePosition);
+      controllerMeasureLabelPosition.lerpVectors(leftControllerMeasurePosition, rightControllerMeasurePosition, 0.5);
+      controllerMeasureLabelPosition.y += 0.065;
+      controllerMeasureLabel.position.copy(controllerMeasureLabelPosition);
+      drawControllerMeasurementLabel(millimetres);
+
+      controllerMeasurement.visible = true;
+    }
+
     function makeControllerRay(color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, 0, 0),
@@ -1257,11 +1418,29 @@
     controller1.addEventListener("connected", (event) => rememberControllerSide(controller1, controllerGrip1, controllerRay1, 0, event));
     controller2.addEventListener("connected", (event) => rememberControllerSide(controller2, controllerGrip2, controllerRay2, 1, event));
 
+    controller1.userData.isSqueezing = false;
+    controller2.userData.isSqueezing = false;
+
+    controller1.addEventListener("squeezestart", () => {
+      controller1.userData.isSqueezing = true;
+    });
+    controller1.addEventListener("squeezeend", () => {
+      controller1.userData.isSqueezing = false;
+    });
+    controller2.addEventListener("squeezestart", () => {
+      controller2.userData.isSqueezing = true;
+    });
+    controller2.addEventListener("squeezeend", () => {
+      controller2.userData.isSqueezing = false;
+    });
+
     function forgetControllerSide(controller, grip) {
       controller.userData.handedness = "unknown";
       controller.userData.inputSource = null;
+      controller.userData.isSqueezing = false;
       grip.userData.handedness = "unknown";
       grip.userData.inputSource = null;
+      hideControllerMeasurement();
       updateControllerVisuals();
       updateHandVisuals();
     }
@@ -3060,6 +3239,9 @@
     measureFingertipsInput.addEventListener("change", () => {
       if (!measureFingertipsInput.checked) hideFingertipMeasurement();
     });
+    measureControllersInput.addEventListener("change", () => {
+      if (!measureControllersInput.checked) hideControllerMeasurement();
+    });
     arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
     floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
     floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
@@ -3117,7 +3299,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed markers or cuts. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed markers or cuts. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. With controllers active, squeeze and hold both grip buttons to show the controller-to-controller distance in mm.`
         );
       } else {
         setStatus(
@@ -3125,7 +3307,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. With controllers active, squeeze and hold both grip buttons to show the controller-to-controller distance in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -3165,9 +3347,12 @@
       floorMarker.visible = false;
       ceilingMarker.visible = false;
       updateClippingPlanes();
+      controller1.userData.isSqueezing = false;
+      controller2.userData.isSqueezing = false;
       updateControllerVisuals();
       updateHandVisuals();
       hideFingertipMeasurement();
+      hideControllerMeasurement();
       stopLeftPinchCentrePlacement(false);
       stopRightPinchMove(false);
       arConfirm.classList.remove("show");
@@ -3186,6 +3371,7 @@
         updateLeftHandPinchCentrePlacement();
         updateRightHandPinchMove();
         updateFingertipMeasurement();
+        updateControllerMeasurement();
         updateMarkerReveal(dt);
         if (xrCutArmTimer > 0) {
           xrCutArmTimer = Math.max(0, xrCutArmTimer - dt);
@@ -3194,6 +3380,7 @@
         markerRevealTimer = 0;
         xrCutArmTimer = 0;
         hideFingertipMeasurement();
+        hideControllerMeasurement();
         stopLeftPinchCentrePlacement(false);
         stopRightPinchMove(false);
         }
