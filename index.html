@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 45</title>
+  <title>Quest OBJ Viewer version 46</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 45</h1>
+        <h1>Quest OBJ Viewer version 46</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -428,7 +428,7 @@
       <div class="control">
         <div>
           <b>Measure between index fingertips</b><br />
-          <span>When both tracked index fingers are extended, displays the live fingertip-to-fingertip distance in millimetres inside VR/AR.</span>
+          <span>When both hands are pointing with only the index finger extended and the thumb, middle, ring and little fingers folded, displays the live fingertip-to-fingertip distance in millimetres inside VR/AR.</span>
         </div>
         <input id="measureFingertipsInput" type="checkbox" checked />
       </div>
@@ -508,7 +508,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. They cannot affect the OBJ or controls. Extend both index fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. They cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -749,10 +749,45 @@
       "index-finger-phalanx-distal",
       "index-finger-tip"
     ];
+    const FOLDED_FINGER_JOINT_NAMES = {
+      thumb: [
+        "thumb-metacarpal",
+        "thumb-phalanx-proximal",
+        "thumb-phalanx-distal",
+        "thumb-tip"
+      ],
+      middle: [
+        "middle-finger-metacarpal",
+        "middle-finger-phalanx-proximal",
+        "middle-finger-phalanx-intermediate",
+        "middle-finger-phalanx-distal",
+        "middle-finger-tip"
+      ],
+      ring: [
+        "ring-finger-metacarpal",
+        "ring-finger-phalanx-proximal",
+        "ring-finger-phalanx-intermediate",
+        "ring-finger-phalanx-distal",
+        "ring-finger-tip"
+      ],
+      little: [
+        "pinky-finger-metacarpal",
+        "pinky-finger-phalanx-proximal",
+        "pinky-finger-phalanx-intermediate",
+        "pinky-finger-phalanx-distal",
+        "pinky-finger-tip"
+      ]
+    };
     const leftIndexJointPositions = INDEX_JOINT_NAMES.map(() => new THREE.Vector3());
     const rightIndexJointPositions = INDEX_JOINT_NAMES.map(() => new THREE.Vector3());
-    const indexDirectionA = new THREE.Vector3();
-    const indexDirectionB = new THREE.Vector3();
+    const leftFoldedJointPositions = Object.fromEntries(
+      Object.entries(FOLDED_FINGER_JOINT_NAMES).map(([finger, joints]) => [finger, joints.map(() => new THREE.Vector3())])
+    );
+    const rightFoldedJointPositions = Object.fromEntries(
+      Object.entries(FOLDED_FINGER_JOINT_NAMES).map(([finger, joints]) => [finger, joints.map(() => new THREE.Vector3())])
+    );
+    const fingerDirectionA = new THREE.Vector3();
+    const fingerDirectionB = new THREE.Vector3();
     const fingertipLabelPosition = new THREE.Vector3();
     let displayedFingertipMillimetres = null;
 
@@ -783,27 +818,79 @@
       return Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z);
     }
 
-    function isIndexFingerExtended(handRoot, jointPositions) {
-      for (let i = 0; i < INDEX_JOINT_NAMES.length; i += 1) {
-        if (!getJointWorldPosition(handRoot, INDEX_JOINT_NAMES[i], jointPositions[i])) {
+    function readJointPositions(handRoot, jointNames, jointPositions) {
+      for (let i = 0; i < jointNames.length; i += 1) {
+        if (!getJointWorldPosition(handRoot, jointNames[i], jointPositions[i])) {
           return false;
         }
       }
+      return true;
+    }
 
-      let curledPathLength = 0;
+    function getTrackedPathLength(jointPositions) {
+      let pathLength = 0;
       for (let i = 1; i < jointPositions.length; i += 1) {
-        curledPathLength += jointPositions[i - 1].distanceTo(jointPositions[i]);
+        pathLength += jointPositions[i - 1].distanceTo(jointPositions[i]);
       }
+      return pathLength;
+    }
+
+    function isIndexFingerExtended(handRoot, jointPositions) {
+      if (!readJointPositions(handRoot, INDEX_JOINT_NAMES, jointPositions)) return false;
+
+      const pathLength = getTrackedPathLength(jointPositions);
+      if (pathLength < 0.025) return false;
 
       const straightReach = jointPositions[0].distanceTo(jointPositions[jointPositions.length - 1]);
-      if (curledPathLength < 0.025) return false;
+      const straightness = straightReach / pathLength;
+      fingerDirectionA.subVectors(jointPositions[2], jointPositions[0]).normalize();
+      fingerDirectionB.subVectors(jointPositions[4], jointPositions[3]).normalize();
 
-      // A straight index finger has nearly the same knuckle-to-tip reach as the
-      // sum of its tracked segments. The direction check rejects a hooked tip.
-      const straightness = straightReach / curledPathLength;
-      indexDirectionA.subVectors(jointPositions[2], jointPositions[0]).normalize();
-      indexDirectionB.subVectors(jointPositions[4], jointPositions[3]).normalize();
-      return straightness > 0.88 && indexDirectionA.dot(indexDirectionB) > 0.72;
+      // The index finger must remain long and straight instead of hooked or curled.
+      return straightness > 0.88 && fingerDirectionA.dot(fingerDirectionB) > 0.72;
+    }
+
+    function isFingerFolded(handRoot, fingerName, jointPositions) {
+      const jointNames = FOLDED_FINGER_JOINT_NAMES[fingerName];
+      if (!readJointPositions(handRoot, jointNames, jointPositions)) return false;
+
+      const pathLength = getTrackedPathLength(jointPositions);
+      if (pathLength < 0.018) return false;
+
+      const straightReach = jointPositions[0].distanceTo(jointPositions[jointPositions.length - 1]);
+      const straightness = straightReach / pathLength;
+      fingerDirectionA.subVectors(jointPositions[2], jointPositions[0]).normalize();
+      fingerDirectionB.subVectors(
+        jointPositions[jointPositions.length - 1],
+        jointPositions[jointPositions.length - 2]
+      ).normalize();
+
+      // A folded middle/ring/little finger loses both full reach and straight alignment.
+      return straightness < 0.84 && fingerDirectionA.dot(fingerDirectionB) < 0.72;
+    }
+
+    function isThumbFolded(handRoot, thumbPositions, indexPositions, middlePositions) {
+      if (!readJointPositions(handRoot, FOLDED_FINGER_JOINT_NAMES.thumb, thumbPositions)) return false;
+
+      const thumbPathLength = getTrackedPathLength(thumbPositions);
+      if (thumbPathLength < 0.015) return false;
+
+      const thumbTip = thumbPositions[thumbPositions.length - 1];
+      const distanceToIndexBase = thumbTip.distanceTo(indexPositions[0]);
+      const distanceToMiddleBase = thumbTip.distanceTo(middlePositions[0]);
+      const tuckDistance = Math.min(distanceToIndexBase, distanceToMiddleBase);
+
+      // A tucked thumb sits over/alongside the curled fingers near the palm;
+      // an extended thumb moves markedly away from both finger metacarpals.
+      return tuckDistance < Math.max(0.052, thumbPathLength * 1.10);
+    }
+
+    function isPointingOnlyWithIndex(handRoot, indexPositions, foldedPositions) {
+      if (!isIndexFingerExtended(handRoot, indexPositions)) return false;
+      if (!isFingerFolded(handRoot, "middle", foldedPositions.middle)) return false;
+      if (!isFingerFolded(handRoot, "ring", foldedPositions.ring)) return false;
+      if (!isFingerFolded(handRoot, "little", foldedPositions.little)) return false;
+      return isThumbFolded(handRoot, foldedPositions.thumb, indexPositions, foldedPositions.middle);
     }
 
     function drawFingertipMeasurementLabel(millimetres) {
@@ -844,8 +931,8 @@
       if (
         !leftHandRoot ||
         !rightHandRoot ||
-        !isIndexFingerExtended(leftHandRoot, leftIndexJointPositions) ||
-        !isIndexFingerExtended(rightHandRoot, rightIndexJointPositions)
+        !isPointingOnlyWithIndex(leftHandRoot, leftIndexJointPositions, leftFoldedJointPositions) ||
+        !isPointingOnlyWithIndex(rightHandRoot, rightIndexJointPositions, rightFoldedJointPositions)
       ) {
         hideFingertipMeasurement();
         return;
@@ -2594,7 +2681,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Extend both index fingers to show their separation in mm.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm.`
         );
       } else {
         setStatus(
@@ -2602,7 +2689,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Extend both index fingers to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
