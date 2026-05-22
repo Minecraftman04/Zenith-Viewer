@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 48</title>
+  <title>Quest OBJ Viewer version 49</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 48</h1>
+        <h1>Quest OBJ Viewer version 49</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -472,16 +472,16 @@
 
       <div class="control">
         <div>
-          <b>AR floor placement</b><br />
-          <span>In passthrough, keep the bottom of the model on the calibrated floor. No head-height value is needed.</span>
+          <b>Automatic AR floor placement</b><br />
+          <span>In passthrough, the model is automatically placed onto the detected real floor. Manual floor adjustment remains available below as an override.</span>
         </div>
         <input id="arFloorInput" type="checkbox" checked />
       </div>
 
       <div class="control">
         <div>
-          <b>XR floor calibration</b><br />
-          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
+          <b>Manual XR floor override</b><br />
+          <span>AR now detects and uses the real floor automatically. If it needs correcting, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. You can also nudge the floor up/down. In VR this remains the floor calibration method.</span>
         </div>
         <div class="row" style="justify-content:flex-end;margin:0;">
           <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
@@ -608,7 +608,9 @@
     document.body.appendChild(vrButton);
 
     const arButton = ARButton.createButton(renderer, {
-      optionalFeatures: [...xrOptionalFeatures, "dom-overlay"],
+      // Hit testing lets passthrough place the OBJ on the real detected floor automatically.
+      // It remains optional so AR still starts on browsers that only expose local-floor tracking.
+      optionalFeatures: [...xrOptionalFeatures, "dom-overlay", "hit-test"],
       domOverlay: { root: document.body }
     });
 
@@ -1406,7 +1408,16 @@
     const xrQuat = new THREE.Quaternion();
     const xrCamPos = new THREE.Vector3();
     const controllerPos = new THREE.Vector3();
-    const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only if Quest reports the XR origin at head height.
+    const AUTO_FLOOR_FALLBACK_Y = -1.55; // Used only while an AR floor plane has not yet been found.
+    const AR_FLOOR_SURFACE_UP_DOT = 0.78; // Reject walls/sloped surfaces: accept mostly horizontal planes only.
+    const AR_FLOOR_MIN_HEAD_DROP = 0.70; // Reject desks/tables by requiring the hit to be well below the headset.
+    let arFloorHitTestSource = null;
+    let arDetectedFloorLocked = false;
+    let arHitTestUnavailableMessageShown = false;
+    const arFloorHitPosition = new THREE.Vector3();
+    const arFloorHitQuaternion = new THREE.Quaternion();
+    const arFloorHitUp = new THREE.Vector3();
+    const xrWorldUp = new THREE.Vector3(0, 1, 0);
     let isPassthroughAR = false;
     let previousFloorVisible = true;
     let previousGridVisible = true;
@@ -2063,6 +2074,138 @@
       updateCeilingMarker(true);
     }
 
+    function stopARFloorHitTest() {
+      if (arFloorHitTestSource) {
+        arFloorHitTestSource.cancel?.();
+      }
+
+      arFloorHitTestSource = null;
+      arDetectedFloorLocked = false;
+      arHitTestUnavailableMessageShown = false;
+    }
+
+    async function startARFloorHitTest(session) {
+      stopARFloorHitTest();
+
+      if (
+        !isPassthroughAR ||
+        !session ||
+        typeof session.requestReferenceSpace !== "function" ||
+        typeof session.requestHitTestSource !== "function" ||
+        typeof XRRay !== "function"
+      ) {
+        return;
+      }
+
+      try {
+        const viewerSpace = await session.requestReferenceSpace("viewer");
+
+        if (session !== renderer.xr.getSession() || !isPassthroughAR) return;
+
+        // Cast forward and down from the headset so the automatic placement point
+        // is on the detected floor in front of the user rather than under their feet.
+        arFloorHitTestSource = await session.requestHitTestSource({
+          space: viewerSpace,
+          offsetRay: new XRRay(
+            { x: 0, y: 0, z: 0, w: 1 },
+            { x: 0, y: -0.70710678, z: -0.70710678, w: 0 }
+          )
+        });
+      } catch (error) {
+        console.warn("AR hit-test floor detection is unavailable; using XR floor fallback.", error);
+
+        if (
+          isPassthroughAR &&
+          renderer.xr.isPresenting &&
+          !xrFloorManual &&
+          !arHitTestUnavailableMessageShown
+        ) {
+          arHitTestUnavailableMessageShown = true;
+          setStatus(
+            `<span class="err">Automatic detected-floor placement is unavailable in this AR session.</span>\n` +
+            `The OBJ is using the WebXR estimated floor. Use the manual floor override below if its height is wrong.`
+          );
+        }
+      }
+    }
+
+    function updateARDetectedFloor(frame) {
+      if (
+        !isPassthroughAR ||
+        !frame ||
+        !arFloorHitTestSource ||
+        arDetectedFloorLocked ||
+        xrFloorManual ||
+        typeof frame.getHitTestResults !== "function"
+      ) {
+        return false;
+      }
+
+      const referenceSpace = renderer.xr.getReferenceSpace();
+      if (!referenceSpace) return false;
+
+      let hitResults = [];
+      try {
+        hitResults = frame.getHitTestResults(arFloorHitTestSource);
+      } catch (error) {
+        return false;
+      }
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      for (const hit of hitResults) {
+        const pose = hit.getPose(referenceSpace);
+        if (!pose) continue;
+
+        const position = pose.transform.position;
+        const orientation = pose.transform.orientation;
+        arFloorHitPosition.set(position.x, position.y, position.z);
+        arFloorHitQuaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+        arFloorHitUp.set(0, 1, 0).applyQuaternion(arFloorHitQuaternion).normalize();
+
+        // Only accept a near-horizontal surface substantially below the headset,
+        // which avoids placing the model on a wall, desk or tabletop.
+        const horizontalAlignment = Math.abs(arFloorHitUp.dot(xrWorldUp));
+        if (horizontalAlignment < AR_FLOOR_SURFACE_UP_DOT) continue;
+        if (
+          Number.isFinite(xrCamPos.y) &&
+          arFloorHitPosition.y > xrCamPos.y - AR_FLOOR_MIN_HEAD_DROP
+        ) {
+          continue;
+        }
+
+        xrFloorY = arFloorHitPosition.y;
+        savedFloorCutY = xrFloorY;
+        xrFloorMarkerX = arFloorHitPosition.x;
+        xrFloorMarkerZ = arFloorHitPosition.z;
+        setFloorMarkerAnchorFromWorld(xrFloorMarkerX, savedFloorCutY, xrFloorMarkerZ);
+
+        // Place the model at the actual detected-floor hit point in front of the
+        // user on the first valid AR floor result. Subsequent hand/stick movement
+        // is not overwritten by further plane updates.
+        modelHorizontalOffset.x = arFloorHitPosition.x;
+        modelHorizontalOffset.z = arFloorHitPosition.z;
+        modelVerticalOffset = 0;
+
+        xrFloorAutoSet = true;
+        arDetectedFloorLocked = true;
+        applyXRFloorPlacement();
+        showARConfirmation("AR FLOOR DETECTED");
+
+        setStatus(
+          `<span class="ok">AR floor detected automatically.</span>\n` +
+          `The bottom of the OBJ has been placed on the real detected floor in front of you. ` +
+          `Use the manual floor override only if you need to correct the level.\n` +
+          `You can now move the OBJ using the controller sticks or hand pinches.`
+        );
+
+        return true;
+      }
+
+      return false;
+    }
+
     function autoDetectXRFloor() {
       if (!renderer.xr.isPresenting || xrFloorManual || xrFloorAutoSet) return;
 
@@ -2071,8 +2214,8 @@
 
       if (!Number.isFinite(xrCamPos.y)) return;
 
-      // If the Quest gives a real local-floor space, camera Y is usually around standing eye height.
-      // If Quest gives a head-centred space, camera Y is usually near 0, so y=0 would appear at head height.
+      // Temporary fallback while AR searches for a real hit-tested floor, and the
+      // normal floor placement for VR sessions without AR plane detection.
       xrFloorY = xrCamPos.y > 0.6 ? 0 : AUTO_FLOOR_FALLBACK_Y;
       savedFloorCutY = xrFloorY;
       setFloorMarkerAnchorFromWorld(xrFloorMarkerX, savedFloorCutY, xrFloorMarkerZ);
@@ -2855,12 +2998,15 @@
           grid.visible = false;
         }
 
+        startARFloorHitTest(session);
         setStatus(
-          `<span class="ok">Passthrough/AR mode active.</span>
+          `<span class="ok">Passthrough/AR mode active — searching for the real floor.</span>
 ` +
-          `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
+          `Look towards an open area of floor. The OBJ will automatically be placed on the first suitable detected floor surface in front of you; no manual floor calibration is normally needed.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed markers or cuts. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm.`
+          `If automatic placement needs correcting, use the manual floor override with the left controller and right-controller A + trigger. To set an AR ceiling cut, hold the left controller at the desired cut height and confirm in the same way.
+` +
+          `Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
         );
       } else {
         setStatus(
@@ -2874,6 +3020,8 @@
     });
 
     renderer.xr.addEventListener("sessionend", () => {
+      stopARFloorHitTest();
+
       if (isPassthroughAR) {
         scene.background = normalBackground;
         floor.visible = previousFloorVisible;
@@ -2923,6 +3071,9 @@
       const dt = Math.min(clock.getDelta(), 0.05);
 
       if (renderer.xr.isPresenting) {
+        if (isPassthroughAR) {
+          updateARDetectedFloor(frame);
+        }
         autoDetectXRFloor();
         updateControllerVisuals();
         updateHandVisuals();
