@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 51</title>
+  <title>Quest OBJ Viewer version 52</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 51</h1>
+        <h1>Quest OBJ Viewer version 52</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -419,10 +419,14 @@
 
       <div class="control">
         <div>
-          <b>Hold right grip: spatial wireframe guide</b><br />
-          <span>Hold the right controller grip to reveal a room-scale wireframe/grid aligned to the XR floor. In passthrough it is a spatial guide around the captured floor, not a scan of real walls or furniture.</span>
+          <b>Room surface scan: walls / ceiling</b><br />
+          <span>Normally off. In passthrough, uses Quest/WebXR room geometry to identify and show detected floor, wall and ceiling surfaces while the <b>right grip</b> is held. Complete Quest Room Setup first if no surfaces appear.</span>
+          <div id="roomScanReadout" class="rotationReadout">Off — enable to use detected room surfaces.</div>
         </div>
-        <input id="gripWireframeInput" type="checkbox" checked />
+        <div class="row" style="justify-content:flex-end;margin:0; align-items:center;">
+          <input id="gripWireframeInput" type="checkbox" aria-label="Enable room surface scan" />
+          <button id="captureRoomBtn" class="small" type="button">Capture / refresh</button>
+        </div>
       </div>
 
       <div class="control">
@@ -532,7 +536,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Right controller B shows or hides the captured AR floor overlay after the floor has been detected or manually set. Hold the right controller grip to temporarily reveal a floor-aligned spatial wireframe guide; it is a visual guide, not reconstructed real-room geometry. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Right controller B shows or hides the captured AR floor overlay after the floor has been detected or manually set. Enable <b>Room surface scan</b> in the UI, then in passthrough hold the right controller grip to reveal any real floor, wall and ceiling surfaces supplied by Quest/WebXR scene understanding. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -574,6 +578,8 @@
     const moveInput = document.getElementById("moveInput");
     const showControllersInput = document.getElementById("showControllersInput");
     const gripWireframeInput = document.getElementById("gripWireframeInput");
+    const captureRoomBtn = document.getElementById("captureRoomBtn");
+    const roomScanReadout = document.getElementById("roomScanReadout");
     const showHandsInput = document.getElementById("showHandsInput");
     const leftPinchCentreInput = document.getElementById("leftPinchCentreInput");
     const pinchMoveInput = document.getElementById("pinchMoveInput");
@@ -616,19 +622,15 @@
     });
     document.body.appendChild(vrButton);
 
-    const arButton = ARButton.createButton(renderer, {
-      // Hit testing lets passthrough place the OBJ on the real detected floor automatically.
-      // It remains optional so AR still starts on browsers that only expose local-floor tracking.
-      optionalFeatures: [...xrOptionalFeatures, "dom-overlay", "hit-test"],
-      domOverlay: { root: document.body }
-    });
-
-    // Three.js ARButton labels are usually strings such as "START AR" / "STOP AR".
-    // Do not use a plain .replace("AR", ...), because it also replaces the "AR"
-    // inside "START" and can create broken labels like "STPASSTHROUGHT AR".
+    // The room-surface features are requested only when their UI toggle is enabled
+    // before entering passthrough. Therefore the scan is genuinely off by default.
+    let arButton = null;
+    let arButtonObserver = null;
+    let roomScanFeatureRequestedForSession = false;
     let relabellingARButton = false;
+
     function relabelARButtonForPassthrough() {
-      if (relabellingARButton) return;
+      if (relabellingARButton || !arButton) return;
 
       const currentText = String(arButton.textContent || "").trim();
       const upperText = currentText.toUpperCase();
@@ -651,14 +653,29 @@
       }
     }
 
-    relabelARButtonForPassthrough();
-    new MutationObserver(relabelARButtonForPassthrough).observe(arButton, {
-      childList: true,
-      characterData: true,
-      subtree: true
-    });
+    function createOrRefreshARButton() {
+      if (renderer.xr.isPresenting) return;
+      arButtonObserver?.disconnect();
+      arButton?.remove();
 
-    document.body.appendChild(arButton);
+      const features = [...xrOptionalFeatures, "dom-overlay", "hit-test"];
+      if (gripWireframeInput.checked) {
+        features.push("plane-detection", "mesh-detection");
+      }
+
+      arButton = ARButton.createButton(renderer, {
+        // Hit testing supplies immediate floor placement. Room scene geometry is
+        // requested only after the opt-in scan control has been enabled.
+        optionalFeatures: features,
+        domOverlay: { root: document.body }
+      });
+      relabelARButtonForPassthrough();
+      arButtonObserver = new MutationObserver(relabelARButtonForPassthrough);
+      arButtonObserver.observe(arButton, { childList: true, characterData: true, subtree: true });
+      document.body.appendChild(arButton);
+    }
+
+    createOrRefreshARButton();
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -1387,96 +1404,37 @@
     });
     capturedFloorVisual.add(capturedFloorGrid);
 
-    // Hold-to-view spatial wireframe guide. Standard WebXR in this page can provide
-    // floor placement but does not expose a reconstructed mesh of real furniture or
-    // walls, so this deliberately draws a floor-aligned room-scale guide instead of
-    // falsely implying that the environment itself has been scanned.
-    const environmentWireframe = new THREE.Group();
-    environmentWireframe.name = "right_grip_spatial_wireframe_guide";
-    environmentWireframe.visible = false;
-    markerAnchorRoot.add(environmentWireframe);
+    // Room surface scan visualisation. When enabled in passthrough, this draws only
+    // geometry delivered by WebXR plane/mesh detection. It does not invent room walls.
+    const roomScanRoot = new THREE.Group();
+    roomScanRoot.name = "detected_room_surface_wireframe";
+    roomScanRoot.visible = false;
+    scene.add(roomScanRoot);
 
-    const environmentFloorGrid = new THREE.GridHelper(6, 24, 0x7cc7ff, 0x3c9cda);
-    const environmentFloorGridMaterials = Array.isArray(environmentFloorGrid.material)
-      ? environmentFloorGrid.material
-      : [environmentFloorGrid.material];
-    environmentFloorGridMaterials.forEach((material) => {
-      material.transparent = true;
-      material.opacity = 0.76;
-      material.depthTest = false;
-      material.depthWrite = false;
-    });
-    environmentFloorGrid.renderOrder = 1100;
-    environmentWireframe.add(environmentFloorGrid);
+    const roomPlaneVisuals = new Map();
+    const roomMeshVisuals = new Map();
+    const roomScanPoseMatrix = new THREE.Matrix4();
+    const roomScanNormal = new THREE.Vector3();
+    const roomScanPosition = new THREE.Vector3();
+    const roomScanUp = new THREE.Vector3(0, 1, 0);
+    const roomScanStats = { floor: 0, wall: 0, ceiling: 0, other: 0, mesh: 0 };
+    const roomSurfaceColours = {
+      floor: 0x96f0b1,
+      wall: 0x7cc7ff,
+      ceiling: 0xffd27c,
+      other: 0xb7c0d1,
+      mesh: 0xb968ff
+    };
 
-    const wireframeRoomHalfSize = 3.0;
-    const wireframeRoomHeight = 2.45;
-    const wireframeCagePoints = [];
-    function addWireframeEdge(ax, ay, az, bx, by, bz) {
-      wireframeCagePoints.push(new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz));
-    }
-
-    const wireframeCorners = [
-      [-wireframeRoomHalfSize, -wireframeRoomHalfSize],
-      [wireframeRoomHalfSize, -wireframeRoomHalfSize],
-      [wireframeRoomHalfSize, wireframeRoomHalfSize],
-      [-wireframeRoomHalfSize, wireframeRoomHalfSize]
-    ];
-    const wireframeLevels = [0, 1.0, 2.0, wireframeRoomHeight];
-
-    for (const level of wireframeLevels) {
-      for (let i = 0; i < wireframeCorners.length; i += 1) {
-        const start = wireframeCorners[i];
-        const end = wireframeCorners[(i + 1) % wireframeCorners.length];
-        addWireframeEdge(start[0], level, start[1], end[0], level, end[1]);
-      }
-    }
-
-    for (const corner of wireframeCorners) {
-      addWireframeEdge(corner[0], 0, corner[1], corner[0], wireframeRoomHeight, corner[1]);
-    }
-
-    const environmentCage = new THREE.LineSegments(
-      new THREE.BufferGeometry().setFromPoints(wireframeCagePoints),
-      new THREE.LineBasicMaterial({
-        color: 0x7cc7ff,
+    function makeRoomLineMaterial(surfaceType, opacity = 0.92) {
+      return new THREE.LineBasicMaterial({
+        color: roomSurfaceColours[surfaceType] ?? roomSurfaceColours.other,
         transparent: true,
-        opacity: 0.60,
+        opacity,
         depthTest: false,
         depthWrite: false
-      })
-    );
-    environmentCage.renderOrder = 1101;
-    environmentWireframe.add(environmentCage);
-
-    const environmentScanGrid = new THREE.GridHelper(6, 24, 0x96f0b1, 0x96f0b1);
-    const environmentScanMaterials = Array.isArray(environmentScanGrid.material)
-      ? environmentScanGrid.material
-      : [environmentScanGrid.material];
-    environmentScanMaterials.forEach((material) => {
-      material.transparent = true;
-      material.opacity = 0.23;
-      material.depthTest = false;
-      material.depthWrite = false;
-    });
-    environmentScanGrid.renderOrder = 1102;
-    environmentWireframe.add(environmentScanGrid);
-
-    const environmentFloorTarget = new THREE.Mesh(
-      new THREE.RingGeometry(0.23, 0.25, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x96f0b1,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.94,
-        depthTest: false,
-        depthWrite: false
-      })
-    );
-    environmentFloorTarget.rotation.x = -Math.PI / 2;
-    environmentFloorTarget.position.y = 0.006;
-    environmentFloorTarget.renderOrder = 1103;
-    environmentWireframe.add(environmentFloorTarget);
+      });
+    }
 
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
@@ -1595,7 +1553,11 @@
     let rightGripEventHeld = false;
     let rightGripButtonHeld = false;
     let rightGripButtonWasPressed = false;
-    let environmentWireframeScanTime = 0;
+    let roomScanWaitingSeconds = 0;
+    let roomScanSupportMessageShown = false;
+    let roomScanLastCountsKey = "";
+    let roomCaptureAttempted = false;
+    let scannedCeilingAvailable = false;
 
     // Fixed marker anchors stored in markerAnchorRoot local space.
     // These are changed only when you set/nudge the floor or ceiling.
@@ -2241,34 +2203,261 @@
       capturedFloorVisual.updateMatrixWorld(true);
     }
 
-    function updateEnvironmentWireframe(dt = 0) {
-      const shouldShow =
-        renderer.xr.isPresenting &&
-        gripWireframeInput.checked &&
-        (rightGripEventHeld || rightGripButtonHeld);
+    function setRoomScanReadout(textValue, ok = false) {
+      roomScanReadout.textContent = textValue;
+      roomScanReadout.classList.toggle("ok", ok);
+    }
 
-      environmentWireframe.visible = shouldShow;
-      if (!shouldShow) return;
+    function disposeRoomScanObject(object) {
+      if (!object) return;
+      roomScanRoot.remove(object);
+      object.geometry?.dispose?.();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material?.dispose?.();
+    }
 
-      // Reuse the fixed tracking-space floor anchor so moving/rotating the OBJ can
-      // never drag this guide around with it. The tiny lift prevents z-fighting.
-      environmentWireframe.position.copy(floorMarkerWorldPosition);
-      environmentWireframe.position.y -= 0.002;
+    function clearRoomScanVisuals(resetReadout = false) {
+      for (const object of roomPlaneVisuals.values()) disposeRoomScanObject(object);
+      for (const object of roomMeshVisuals.values()) disposeRoomScanObject(object);
+      roomPlaneVisuals.clear();
+      roomMeshVisuals.clear();
+      roomScanRoot.visible = false;
+      roomScanWaitingSeconds = 0;
+      roomScanLastCountsKey = "";
+      scannedCeilingAvailable = false;
+      if (resetReadout) setRoomScanReadout("Off — enable to use detected room surfaces.");
+    }
 
-      environmentWireframeScanTime = (environmentWireframeScanTime + dt) % 2.2;
-      const scanFraction = environmentWireframeScanTime / 2.2;
-      environmentScanGrid.position.y = 0.025 + scanFraction * (wireframeRoomHeight - 0.05);
+    function classifyDetectedSurface(label, normal, position) {
+      const semantic = String(label || "").toLowerCase();
+      if (semantic.includes("ceiling")) return "ceiling";
+      if (semantic.includes("floor")) return "floor";
+      if (semantic.includes("wall")) return "wall";
 
-      environmentWireframe.updateMatrixWorld(true);
+      const upDot = Math.abs(normal.dot(roomScanUp));
+      if (upDot > 0.78) {
+        if (position.y > xrFloorY + 1.45) return "ceiling";
+        if (position.y < xrFloorY + 0.25) return "floor";
+      }
+      if (upDot < 0.42) return "wall";
+      return "other";
+    }
+
+    function setObjectFromXRPose(object, pose) {
+      if (!pose?.transform?.matrix) return false;
+      object.matrixAutoUpdate = false;
+      object.matrix.fromArray(pose.transform.matrix);
+      object.matrixWorldNeedsUpdate = true;
+      return true;
+    }
+
+    function updateDetectedPlaneVisual(plane, pose, surfaceType) {
+      const polygon = Array.from(plane.polygon || []);
+      if (polygon.length < 3) return;
+
+      let line = roomPlaneVisuals.get(plane);
+      const geometryChanged = !line || line.userData.lastChangedTime !== plane.lastChangedTime;
+      if (geometryChanged) {
+        if (line) disposeRoomScanObject(line);
+        const points = polygon.map((point) => new THREE.Vector3(point.x, point.y + 0.003, point.z));
+        points.push(points[0].clone());
+        line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(points),
+          makeRoomLineMaterial(surfaceType, surfaceType === "other" ? 0.42 : 0.96)
+        );
+        line.renderOrder = 1110;
+        line.userData.lastChangedTime = plane.lastChangedTime;
+        roomPlaneVisuals.set(plane, line);
+        roomScanRoot.add(line);
+      } else if (line.userData.surfaceType !== surfaceType) {
+        line.material.color.setHex(roomSurfaceColours[surfaceType] ?? roomSurfaceColours.other);
+      }
+      line.userData.surfaceType = surfaceType;
+      line.visible = surfaceType !== "other";
+      setObjectFromXRPose(line, pose);
+    }
+
+    function updateDetectedMeshVisual(mesh, pose, label) {
+      let line = roomMeshVisuals.get(mesh);
+      const geometryChanged = !line || line.userData.lastChangedTime !== mesh.lastChangedTime;
+      if (geometryChanged) {
+        if (line) disposeRoomScanObject(line);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(mesh.vertices), 3));
+        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.indices), 1));
+        const wireGeometry = new THREE.WireframeGeometry(geometry);
+        geometry.dispose();
+        line = new THREE.LineSegments(wireGeometry, makeRoomLineMaterial("mesh", 0.34));
+        line.renderOrder = 1105;
+        line.userData.lastChangedTime = mesh.lastChangedTime;
+        line.userData.label = String(label || "room mesh");
+        roomMeshVisuals.set(mesh, line);
+        roomScanRoot.add(line);
+      }
+      setObjectFromXRPose(line, pose);
+    }
+
+    function updateScanDerivedCeiling(surfaceType, pose) {
+      if (surfaceType !== "ceiling" || !pose?.transform?.position || xrCeilingManual) return;
+      const position = pose.transform.position;
+      if (!Number.isFinite(position.y) || position.y <= xrFloorY + 1.35) return;
+
+      xrCeilingY = position.y;
+      savedCeilingCutY = position.y;
+      xrCeilingMarkerX = position.x;
+      xrCeilingMarkerZ = position.z;
+      setCeilingMarkerAnchorFromWorld(position.x, position.y, position.z);
+      xrCeilingManual = true;
+      scannedCeilingAvailable = true;
+      updateClippingPlanes();
+    }
+
+    function updateEnvironmentWireframe(frameOrDt = null, dtValue = 0) {
+      const frame = frameOrDt && typeof frameOrDt === "object" ? frameOrDt : null;
+      const dt = typeof frameOrDt === "number" ? frameOrDt : dtValue;
+      const scanEnabled = renderer.xr.isPresenting && isPassthroughAR && gripWireframeInput.checked && roomScanFeatureRequestedForSession;
+      const shouldDisplay = scanEnabled && (rightGripEventHeld || rightGripButtonHeld);
+      roomScanRoot.visible = shouldDisplay;
+
+      if (!scanEnabled || !frame) return;
+
+      const referenceSpace = renderer.xr.getReferenceSpace();
+      if (!referenceSpace) return;
+
+      let detectedPlanes = null;
+      let detectedMeshes = null;
+      try {
+        // Current WebXR drafts expose these on XRFrame; older Meta Browser
+        // documentation described session collections, so accept either form.
+        const session = renderer.xr.getSession();
+        detectedPlanes = frame.detectedPlanes || session?.detectedPlanes || null;
+        detectedMeshes = frame.detectedMeshes || session?.detectedMeshes || null;
+      } catch (error) {
+        detectedPlanes = null;
+        detectedMeshes = null;
+      }
+
+      if (!detectedPlanes && !detectedMeshes) {
+        if (!roomScanSupportMessageShown) {
+          roomScanSupportMessageShown = true;
+          setRoomScanReadout("Room geometry API unavailable in this passthrough session.");
+          setStatus(
+            `<span class="err">Room surface scan is unavailable in this WebXR session.</span>\n` +
+            `The viewer requested plane and mesh detection, but the browser did not expose detected surfaces. Try updating Quest Browser and completing Quest Room Setup.`
+          );
+        }
+        return;
+      }
+
+      Object.keys(roomScanStats).forEach((key) => { roomScanStats[key] = 0; });
+      const visiblePlanes = new Set();
+      const visibleMeshes = new Set();
+
+      if (detectedPlanes) {
+        for (const plane of detectedPlanes) {
+          const pose = frame.getPose(plane.planeSpace, referenceSpace);
+          if (!pose) continue;
+          roomScanPosition.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+          roomScanPoseMatrix.fromArray(pose.transform.matrix);
+          roomScanNormal.set(0, 1, 0).transformDirection(roomScanPoseMatrix).normalize();
+          const surfaceType = classifyDetectedSurface(plane.semanticLabel, roomScanNormal, roomScanPosition);
+          roomScanStats[surfaceType] += 1;
+          updateDetectedPlaneVisual(plane, pose, surfaceType);
+          updateScanDerivedCeiling(surfaceType, pose);
+          visiblePlanes.add(plane);
+        }
+      }
+
+      for (const [plane, object] of roomPlaneVisuals) {
+        if (!visiblePlanes.has(plane)) {
+          disposeRoomScanObject(object);
+          roomPlaneVisuals.delete(plane);
+        }
+      }
+
+      // Mesh visualisation is used as a fallback when a headset exposes a room mesh
+      // without individual planes. Planes are preferred for wall/ceiling labels.
+      if (detectedMeshes && visiblePlanes.size === 0) {
+        for (const mesh of detectedMeshes) {
+          const pose = frame.getPose(mesh.meshSpace, referenceSpace);
+          if (!pose) continue;
+          updateDetectedMeshVisual(mesh, pose, mesh.semanticLabel);
+          roomScanStats.mesh += 1;
+          visibleMeshes.add(mesh);
+        }
+      }
+      for (const [mesh, object] of roomMeshVisuals) {
+        if (!visibleMeshes.has(mesh)) {
+          disposeRoomScanObject(object);
+          roomMeshVisuals.delete(mesh);
+        }
+      }
+
+      const surfaceCount = roomScanStats.floor + roomScanStats.wall + roomScanStats.ceiling + roomScanStats.mesh;
+      if (surfaceCount === 0) {
+        roomScanWaitingSeconds += dt;
+        if (roomScanWaitingSeconds > 1.2) {
+          setRoomScanReadout("No room surfaces supplied yet — run Quest Room Setup / Capture refresh.");
+        }
+        return;
+      }
+
+      roomScanWaitingSeconds = 0;
+      const countsKey = `${roomScanStats.floor}/${roomScanStats.wall}/${roomScanStats.ceiling}/${roomScanStats.mesh}`;
+      if (countsKey !== roomScanLastCountsKey) {
+        roomScanLastCountsKey = countsKey;
+        const meshText = roomScanStats.mesh ? `, mesh ${roomScanStats.mesh}` : "";
+        setRoomScanReadout(
+          `Detected: floor ${roomScanStats.floor}, walls ${roomScanStats.wall}, ceiling ${roomScanStats.ceiling}${meshText}. Hold right grip to view.`,
+          true
+        );
+      }
+    }
+
+    async function requestRoomCapture(showMessage = true) {
+      if (!gripWireframeInput.checked) {
+        setStatus(`<span class="err">Enable Room surface scan first.</span>\nIt is off by default so room geometry is not displayed unless you choose to use it.`);
+        return;
+      }
+      if (!renderer.xr.isPresenting || !isPassthroughAR) {
+        setStatus(`<span class="err">Room surface capture is available in passthrough only.</span>\nEnable Room surface scan, enter passthrough, then press <b>Capture / refresh</b> if no surfaces appear.`);
+        return;
+      }
+      if (!roomScanFeatureRequestedForSession) {
+        setStatus(`<span class="err">Restart passthrough to enable room geometry access.</span>\nExit passthrough and enter again after enabling <b>Room surface scan</b>.`);
+        return;
+      }
+
+      const session = renderer.xr.getSession();
+      roomCaptureAttempted = true;
+      if (typeof session?.initiateRoomCapture !== "function") {
+        setStatus(
+          `<span class="err">This browser session cannot open room capture directly.</span>\n` +
+          `Use Quest Room Setup in the headset system settings, return to passthrough, and keep Room surface scan enabled.`
+        );
+        return;
+      }
+
+      try {
+        if (showMessage) showARConfirmation("CAPTURING ROOM");
+        await session.initiateRoomCapture();
+        setStatus(
+          `<span class="ok">Room capture requested.</span>\n` +
+          `When detected surfaces arrive, hold the right grip to reveal the floor, wall and ceiling wireframes.`
+        );
+      } catch (error) {
+        setStatus(
+          `<span class="err">Room capture could not be started.</span>\n` +
+          `Complete Quest Room Setup manually, then return to passthrough. ${escapeHTML(error?.message || "")}`
+        );
+      }
     }
 
     function setRightGripWireframeEventHeld(held, showMessage = true) {
-      const wasVisible = environmentWireframe.visible;
       rightGripEventHeld = held;
       updateEnvironmentWireframe(0);
-
-      if (showMessage && !wasVisible && environmentWireframe.visible) {
-        showARConfirmation("SPATIAL WIREFRAME GUIDE");
+      if (showMessage && held && gripWireframeInput.checked && isPassthroughAR) {
+        showARConfirmation(roomPlaneVisuals.size || roomMeshVisuals.size ? "ROOM SURFACES" : "NO SURFACES YET");
       }
     }
 
@@ -2276,19 +2465,15 @@
       rightGripEventHeld = false;
       rightGripButtonHeld = false;
       rightGripButtonWasPressed = false;
-      environmentWireframeScanTime = 0;
-      environmentWireframe.visible = false;
+      roomScanRoot.visible = false;
     }
 
     function handleGripWireframeStart(controller, event = null) {
-      if (!renderer.xr.isPresenting || !gripWireframeInput.checked) return;
-
+      if (!renderer.xr.isPresenting || !isPassthroughAR || !gripWireframeInput.checked) return;
       const inputSource = event?.data || controller?.userData?.inputSource || null;
       if (isTrackedHandSource(inputSource)) return;
-
       const handedness = inputSource?.handedness || controller?.userData?.handedness || "unknown";
       if (handedness !== "right") return;
-
       setRightGripWireframeEventHeld(true, true);
     }
 
@@ -2296,7 +2481,6 @@
       const inputSource = event?.data || controller?.userData?.inputSource || null;
       const handedness = inputSource?.handedness || controller?.userData?.handedness || "unknown";
       if (handedness !== "right") return;
-
       setRightGripWireframeEventHeld(false, false);
     }
 
@@ -3121,8 +3305,8 @@
           // fallback alongside squeezestart/squeezeend for Quest browser variations.
           const gripPressed = isRightGripButtonPressed(gp);
           rightGripButtonHeld = gripPressed;
-          if (gripPressed && !rightGripButtonWasPressed && !environmentWireframe.visible) {
-            showARConfirmation("SPATIAL WIREFRAME GUIDE");
+          if (gripPressed && !rightGripButtonWasPressed && !roomScanRoot.visible) {
+            showARConfirmation(roomPlaneVisuals.size || roomMeshVisuals.size ? "ROOM SURFACES" : "NO SURFACES YET");
           }
           rightGripButtonWasPressed = gripPressed;
           updateEnvironmentWireframe(0);
@@ -3258,10 +3442,19 @@
     gripWireframeInput.addEventListener("change", () => {
       if (!gripWireframeInput.checked) {
         hideEnvironmentWireframe();
+        clearRoomScanVisuals(true);
       } else {
-        updateEnvironmentWireframe(0);
+        roomScanSupportMessageShown = false;
+        if (renderer.xr.isPresenting && isPassthroughAR && !roomScanFeatureRequestedForSession) {
+          setRoomScanReadout("Enabled — exit and re-enter passthrough to start room scanning.");
+          setStatus(`<span class="err">Room surface scan needs a new passthrough session.</span>\nExit passthrough and enter again now that the option is enabled.`);
+        } else {
+          setRoomScanReadout("Enabled — enter passthrough; use Capture / refresh only if no surfaces appear.");
+        }
       }
+      createOrRefreshARButton();
     });
+    captureRoomBtn.addEventListener("click", () => requestRoomCapture(true));
     showHandsInput.addEventListener("change", updateHandVisuals);
     leftPinchCentreInput.addEventListener("change", () => {
       if (!leftPinchCentreInput.checked) stopLeftPinchCentrePlacement(true);
@@ -3298,6 +3491,7 @@
       const session = renderer.xr.getSession();
 
       isPassthroughAR = !!session && session.environmentBlendMode !== "opaque";
+      roomScanFeatureRequestedForSession = isPassthroughAR && gripWireframeInput.checked;
       xrFloorAutoSet = false;
       xrFloorManual = false;
       xrFloorY = 0;
@@ -3305,6 +3499,10 @@
       capturedFloorVisible = false;
       rightBButtonWasPressed = false;
       hideEnvironmentWireframe();
+      clearRoomScanVisuals(false);
+      roomScanSupportMessageShown = false;
+      roomCaptureAttempted = false;
+      if (roomScanFeatureRequestedForSession) setRoomScanReadout("Enabled — waiting for surfaces; use Capture / refresh if none appear after a few seconds.");
       updateCapturedFloorVisual();
 
       if (!isPassthroughAR) {
@@ -3337,7 +3535,7 @@
 ` +
           `If automatic placement needs correcting, use the manual floor override with the left controller and right-controller A + trigger. To set an AR ceiling cut, hold the left controller at the desired cut height and confirm in the same way.
 ` +
-          `After the floor is captured, press right-controller <b>B</b> to show or hide its translucent floor overlay. Hold the <b>right grip</b> to view a floor-aligned spatial wireframe guide (not real-room scanned geometry). Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
+          `After the floor is captured, press right-controller <b>B</b> to show or hide its translucent floor overlay. Room surface scan is normally off; enable it <b>before entering passthrough</b> to request detected room geometry, then hold the <b>right grip</b> to display detected floor, walls and ceiling. If nothing appears after a few seconds, press <b>Capture / refresh</b>. Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
         );
       } else {
         setStatus(
@@ -3345,7 +3543,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Hold the <b>right grip</b> to view the floor-aligned spatial wireframe guide. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Detected room-surface scanning is passthrough-only and remains off by default. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -3360,6 +3558,8 @@
       }
 
       isPassthroughAR = false;
+      roomScanFeatureRequestedForSession = false;
+      createOrRefreshARButton();
       xrFloorY = 0;
       xrCeilingY = 2.2;
       xrCeilingManual = false;
@@ -3385,6 +3585,7 @@
       capturedFloorVisible = false;
       capturedFloorVisual.visible = false;
       hideEnvironmentWireframe();
+      clearRoomScanVisuals(!gripWireframeInput.checked);
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
       setMarkerOpacity(floorMarker, 0);
@@ -3417,7 +3618,7 @@
         updateRightHandPinchMove();
         updateFingertipMeasurement();
         updateMarkerReveal(dt);
-        updateEnvironmentWireframe(dt);
+        updateEnvironmentWireframe(frame, dt);
         if (xrCutArmTimer > 0) {
           xrCutArmTimer = Math.max(0, xrCutArmTimer - dt);
         }
