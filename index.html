@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 46</title>
+  <title>Quest OBJ Viewer version 47</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 46</h1>
+        <h1>Quest OBJ Viewer version 47</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -420,9 +420,17 @@
       <div class="control">
         <div>
           <b>Show tracked look-a-like hands in XR</b><br />
-          <span>When Quest hand tracking is active, shows the realistic look-a-like hand models. Each hand disappears automatically when you pick up that side's controller. These display-only hands cannot affect the OBJ or controls.</span>
+          <span>When Quest hand tracking is active, shows the realistic look-a-like hand models. Each hand disappears automatically when you pick up that side's controller. Apart from the optional right-hand pinch move below, hands cannot affect the OBJ or controls.</span>
         </div>
         <input id="showHandsInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
+          <b>Right-hand pinch move</b><br />
+          <span>Pinch the right thumb and index fingertip together to pick up and move the OBJ in any direction. Open the pinch to let go. The floor, markers and clipping heights remain fixed.</span>
+        </div>
+        <input id="pinchMoveInput" type="checkbox" checked />
       </div>
 
       <div class="control">
@@ -508,7 +516,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. They cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the right thumb and index fingertip together to pick up and freely move the OBJ, then open them to release it; the floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from right-hand pinch move when enabled, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -550,6 +558,7 @@
     const moveInput = document.getElementById("moveInput");
     const showControllersInput = document.getElementById("showControllersInput");
     const showHandsInput = document.getElementById("showHandsInput");
+    const pinchMoveInput = document.getElementById("pinchMoveInput");
     const measureFingertipsInput = document.getElementById("measureFingertipsInput");
     const spinAxisInput = document.getElementById("spinAxisInput");
     const arHideFloorInput = document.getElementById("arHideFloorInput");
@@ -658,8 +667,9 @@
     // visible positions aligned with real tracking if cameraRig is moved.
     cameraRig.add(controller1, controller2, controllerGrip1, controllerGrip2, hand1, hand2);
 
-    // Hand tracking is deliberately visual-only. The tracked hand roots are not
-    // added to any model interaction, transform, clipping or calibration logic.
+    // Hands normally act only as tracked visuals. A separate right-hand thumb/index
+    // pinch interaction below may translate only the OBJ when its toggle is enabled.
+    // It never changes clipping, calibration, marker or XR-rig transforms.
 
     // Floor/ceiling marker anchors live in XR tracking space, not in the OBJ/model space.
     // They are parented to cameraRig on purpose: the camera and controllers are also
@@ -676,8 +686,9 @@
     controllerGrip1.add(controllerModel1);
     controllerGrip2.add(controllerModel2);
 
-    // Use only Three.js' realistic mesh-style tracked hand model. It is display-only:
-    // the viewer never uses hand joints for OBJ movement, clipping, calibration or UI clicks.
+    // Use only Three.js' realistic mesh-style tracked hand model. Hand joints are
+    // used only for the optional right-hand pinch OBJ translation and index measurement;
+    // never for clipping, calibration or UI clicks.
     const handModelFactory = new XRHandModelFactory();
     const handRoots = [hand1, hand2];
     const handModels = handRoots.map((handRoot) => {
@@ -790,6 +801,18 @@
     const fingerDirectionB = new THREE.Vector3();
     const fingertipLabelPosition = new THREE.Vector3();
     let displayedFingertipMillimetres = null;
+
+    // Right-hand pinch-to-move state. The two thresholds provide hysteresis:
+    // a firm pinch starts movement, while a wider opening is needed to release.
+    const RIGHT_PINCH_START_DISTANCE = 0.024;
+    const RIGHT_PINCH_RELEASE_DISTANCE = 0.040;
+    const RIGHT_PINCH_MAX_FRAME_DELTA = 0.16;
+    const rightPinchIndexPosition = new THREE.Vector3();
+    const rightPinchThumbPosition = new THREE.Vector3();
+    const rightPinchMidpoint = new THREE.Vector3();
+    const previousRightPinchMidpoint = new THREE.Vector3();
+    const rightPinchDelta = new THREE.Vector3();
+    let isRightPinchMovingModel = false;
 
     function hideFingertipMeasurement() {
       fingertipMeasurement.visible = false;
@@ -917,6 +940,69 @@
       ctx.fillText(`${millimetres} mm`, width / 2, height / 2 + 1);
 
       fingertipLabelTexture.needsUpdate = true;
+    }
+
+    function stopRightPinchMove(showMessage = false) {
+      if (!isRightPinchMovingModel) return;
+
+      isRightPinchMovingModel = false;
+
+      if (showMessage && renderer.xr.isPresenting) {
+        showARConfirmation("OBJ RELEASED");
+      }
+    }
+
+    function updateRightHandPinchMove() {
+      if (!renderer.xr.isPresenting || !pinchMoveInput.checked || !currentObject) {
+        stopRightPinchMove(false);
+        return;
+      }
+
+      const rightHandRoot = getTrackedHandRoot("right");
+
+      if (
+        !rightHandRoot ||
+        !getJointWorldPosition(rightHandRoot, "index-finger-tip", rightPinchIndexPosition) ||
+        !getJointWorldPosition(rightHandRoot, "thumb-tip", rightPinchThumbPosition)
+      ) {
+        stopRightPinchMove(false);
+        return;
+      }
+
+      const pinchDistance = rightPinchIndexPosition.distanceTo(rightPinchThumbPosition);
+      rightPinchMidpoint.lerpVectors(rightPinchIndexPosition, rightPinchThumbPosition, 0.5);
+
+      if (!isRightPinchMovingModel) {
+        if (pinchDistance > RIGHT_PINCH_START_DISTANCE) return;
+
+        isRightPinchMovingModel = true;
+        previousRightPinchMidpoint.copy(rightPinchMidpoint);
+        showARConfirmation("RIGHT PINCH: MOVING OBJ");
+        return;
+      }
+
+      if (pinchDistance > RIGHT_PINCH_RELEASE_DISTANCE) {
+        stopRightPinchMove(true);
+        return;
+      }
+
+      rightPinchDelta.subVectors(rightPinchMidpoint, previousRightPinchMidpoint);
+      previousRightPinchMidpoint.copy(rightPinchMidpoint);
+
+      // Ignore one-frame tracking jumps so reconnecting a hand cannot throw the OBJ away.
+      if (rightPinchDelta.length() > RIGHT_PINCH_MAX_FRAME_DELTA) return;
+
+      modelHorizontalOffset.x += rightPinchDelta.x;
+      modelHorizontalOffset.z += rightPinchDelta.z;
+      modelVerticalOffset += rightPinchDelta.y;
+
+      modelHorizontalOffset.x = THREE.MathUtils.clamp(modelHorizontalOffset.x, -8.0, 8.0);
+      modelHorizontalOffset.z = THREE.MathUtils.clamp(modelHorizontalOffset.z, -8.0, 8.0);
+      modelVerticalOffset = THREE.MathUtils.clamp(modelVerticalOffset, -3.0, 3.0);
+
+      // Reuse the viewer's existing object-only offsets. Floor/grid/markers/cuts
+      // do not move because they do not depend on these three OBJ placement values.
+      applyModelTransform(currentObject);
     }
 
     function updateFingertipMeasurement() {
@@ -1986,7 +2072,8 @@
       const inputSource = event?.data || triggeringController?.userData?.inputSource || null;
 
       // A hand pinch can be exposed by WebXR as a select/trigger event. Ignore it
-      // completely: tracked fake hands are for visibility only and do nothing.
+      // here so pinch movement cannot accidentally set a floor or AR ceiling cut.
+      // Right-hand pinch OBJ translation is processed independently per frame.
       if (isTrackedHandSource(inputSource)) return;
 
       const hand = triggeringController.userData.handedness || "unknown";
@@ -2333,6 +2420,7 @@
     }
 
     function resetModelPlacement(showMessage = true) {
+      stopRightPinchMove(false);
       modelHorizontalOffset.set(0, 0, 0);
       modelVerticalOffset = 0;
 
@@ -2350,6 +2438,7 @@
     }
 
     function resetModelHeightOnly(showMessage = true) {
+      stopRightPinchMove(false);
       modelVerticalOffset = 0;
 
       if (currentObject) {
@@ -2621,6 +2710,9 @@
     arHideFloorInput.addEventListener("change", updateGrid);
     showControllersInput.addEventListener("change", updateControllerVisuals);
     showHandsInput.addEventListener("change", updateHandVisuals);
+    pinchMoveInput.addEventListener("change", () => {
+      if (!pinchMoveInput.checked) stopRightPinchMove(true);
+    });
     measureFingertipsInput.addEventListener("change", () => {
       if (!measureFingertipsInput.checked) hideFingertipMeasurement();
     });
@@ -2681,7 +2773,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the right thumb and index fingertip together to move the OBJ in 3D, then open them to release; this does not move the fixed markers or cuts. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm.`
         );
       } else {
         setStatus(
@@ -2689,7 +2781,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active and cannot affect the OBJ or controls. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the right thumb and index fingertip together to move the OBJ in 3D, then open them to release; this does not move the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -2732,6 +2824,7 @@
       updateControllerVisuals();
       updateHandVisuals();
       hideFingertipMeasurement();
+      stopRightPinchMove(false);
       arConfirm.classList.remove("show");
       arConfirmTimer = 0;
       reframeCurrentModel(true);
@@ -2745,6 +2838,7 @@
         autoDetectXRFloor();
         updateControllerVisuals();
         updateHandVisuals();
+        updateRightHandPinchMove();
         updateFingertipMeasurement();
         updateMarkerReveal(dt);
         if (xrCutArmTimer > 0) {
@@ -2754,6 +2848,7 @@
         markerRevealTimer = 0;
         xrCutArmTimer = 0;
         hideFingertipMeasurement();
+        stopRightPinchMove(false);
         }
 
       if (arConfirmTimer > 0) {
