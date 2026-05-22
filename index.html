@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 41</title>
+  <title>Quest OBJ Viewer version 42</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 41</h1>
+        <h1>Quest OBJ Viewer version 42</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -420,7 +420,7 @@
       <div class="control">
         <div>
           <b>Show tracked fake hands in XR</b><br />
-          <span>When Quest hand tracking is active, shows moving hand models only. Hands cannot grab, push, scale, move, calibrate, or press anything in the viewer.</span>
+          <span>When Quest hand tracking is active, shows moving hand models. Make a fist with both hands together to cycle the visual style: Mesh → Boxes → Spheres. This cannot affect the OBJ or controls.</span>
         </div>
         <input id="showHandsInput" type="checkbox" checked />
       </div>
@@ -500,7 +500,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands but are visual-only and cannot affect the OBJ or controls. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, the left stick moves only the OBJ horizontally so the floor and XR tracking space stay fixed. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the displayed fake hands follow your real hands. Make a fist with both hands at the same time to change only their visual style (Mesh, Boxes, Spheres); they cannot affect the OBJ or controls. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -667,14 +667,26 @@
     controllerGrip1.add(controllerModel1);
     controllerGrip2.add(controllerModel2);
 
-    // Three.js "mesh" hands provide visible false/fake hands that follow Quest
-    // tracking. They are render-only: no pinch/select listeners or collisions
-    // are attached to these hand roots.
+    // Three.js supplies three built-in visual hand profiles. All are display-only:
+    // the viewer never uses hand joints for OBJ movement, clipping, calibration or UI clicks.
     const handModelFactory = new XRHandModelFactory();
-    const handModel1 = handModelFactory.createHandModel(hand1, "mesh");
-    const handModel2 = handModelFactory.createHandModel(hand2, "mesh");
-    hand1.add(handModel1);
-    hand2.add(handModel2);
+    const HAND_MODEL_STYLES = [
+      { profile: "mesh", label: "Mesh" },
+      { profile: "boxes", label: "Boxes" },
+      { profile: "spheres", label: "Spheres" }
+    ];
+    const handRoots = [hand1, hand2];
+    const handModels = [[], []];
+    let currentHandModelStyleIndex = 0;
+
+    handRoots.forEach((handRoot, handIndex) => {
+      HAND_MODEL_STYLES.forEach((style) => {
+        const model = handModelFactory.createHandModel(handRoot, style.profile);
+        model.visible = false;
+        handRoot.add(model);
+        handModels[handIndex].push(model);
+      });
+    });
 
     function makeControllerRay(color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -704,6 +716,135 @@
       return !!inputSource?.hand;
     }
 
+    // A fist is detected from tracked WebXR finger joints only for selecting the
+    // displayed fake-hand style. It is not connected to any OBJ interaction code.
+    const FIST_FINGERS = [
+      ["index-finger-tip", "index-finger-phalanx-proximal"],
+      ["middle-finger-tip", "middle-finger-phalanx-proximal"],
+      ["ring-finger-tip", "ring-finger-phalanx-proximal"],
+      ["pinky-finger-tip", "pinky-finger-phalanx-proximal"]
+    ];
+    const FIST_TIP_TO_PROXIMAL_RATIO = 1.55;
+    const BOTH_FIST_HOLD_SECONDS = 0.18;
+    const BOTH_FIST_RELEASE_SECONDS = 0.22;
+    const fistWristPosition = new THREE.Vector3();
+    const fistTipPosition = new THREE.Vector3();
+    const fistProximalPosition = new THREE.Vector3();
+    let bothFistsHoldTimer = 0;
+    let bothFistsReleaseTimer = 0;
+    let bothFistsLatched = false;
+
+    function resetBothFistGestureState() {
+      bothFistsHoldTimer = 0;
+      bothFistsReleaseTimer = 0;
+      bothFistsLatched = false;
+    }
+
+    function getHandJoint(handRoot, jointName) {
+      return handRoot?.joints?.[jointName] || handRoot?.joints?.get?.(jointName) || null;
+    }
+
+    function getTrackedJointWorldPosition(handRoot, jointName, target) {
+      const joint = getHandJoint(handRoot, jointName);
+
+      if (!joint || joint.visible === false) return false;
+
+      joint.updateMatrixWorld(true);
+      joint.getWorldPosition(target);
+
+      return Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z);
+    }
+
+    function isHandMakingFist(handRoot) {
+      if (!getTrackedJointWorldPosition(handRoot, "wrist", fistWristPosition)) {
+        return false;
+      }
+
+      let measuredFingers = 0;
+      let curledFingers = 0;
+
+      for (const [tipJointName, proximalJointName] of FIST_FINGERS) {
+        const hasTip = getTrackedJointWorldPosition(handRoot, tipJointName, fistTipPosition);
+        const hasProximal = getTrackedJointWorldPosition(handRoot, proximalJointName, fistProximalPosition);
+
+        if (!hasTip || !hasProximal) continue;
+
+        const proximalDistance = fistProximalPosition.distanceTo(fistWristPosition);
+        const tipDistance = fistTipPosition.distanceTo(fistWristPosition);
+
+        if (proximalDistance < 0.001) continue;
+
+        measuredFingers += 1;
+
+        // An extended finger puts its tip much further from the wrist than its
+        // proximal joint. When curled into a fist the two distances become close.
+        if (tipDistance < proximalDistance * FIST_TIP_TO_PROXIMAL_RATIO) {
+          curledFingers += 1;
+        }
+      }
+
+      // Ignore the thumb for reliability: three curled tracked fingers are enough
+      // for a deliberate fist without depending on where the thumb is resting.
+      return measuredFingers >= 3 && curledFingers >= 3;
+    }
+
+    function hasLeftAndRightTrackedHands() {
+      const session = renderer.xr.getSession();
+      if (!session) return false;
+
+      let leftTracked = false;
+      let rightTracked = false;
+      let trackedCount = 0;
+
+      for (const source of session.inputSources) {
+        if (!isTrackedHandSource(source)) continue;
+
+        trackedCount += 1;
+        if (source.handedness === "left") leftTracked = true;
+        if (source.handedness === "right") rightTracked = true;
+      }
+
+      // Quest should provide handedness; the count fallback avoids disabling the
+      // gesture if a browser temporarily reports two tracked sources as unknown.
+      return (leftTracked && rightTracked) || trackedCount >= 2;
+    }
+
+    function updateBothFistHandModelGesture(dt) {
+      if (!renderer.xr.isPresenting || !showHandsInput.checked || !hasLeftAndRightTrackedHands()) {
+        resetBothFistGestureState();
+        return;
+      }
+
+      const bothFists = isHandMakingFist(hand1) && isHandMakingFist(hand2);
+
+      if (bothFists) {
+        bothFistsReleaseTimer = 0;
+
+        if (!bothFistsLatched) {
+          bothFistsHoldTimer += dt;
+
+          if (bothFistsHoldTimer >= BOTH_FIST_HOLD_SECONDS) {
+            cycleHandModelStyle(true);
+            bothFistsLatched = true;
+            bothFistsHoldTimer = 0;
+          }
+        }
+
+        return;
+      }
+
+      bothFistsHoldTimer = 0;
+
+      if (bothFistsLatched) {
+        bothFistsReleaseTimer += dt;
+
+        if (bothFistsReleaseTimer >= BOTH_FIST_RELEASE_SECONDS) {
+          bothFistsLatched = false;
+          bothFistsReleaseTimer = 0;
+        }
+      }
+    }
+
     function updateControllerVisuals() {
       const show = renderer.xr.isPresenting && showControllersInput.checked;
 
@@ -715,10 +856,34 @@
       controllerRay2.visible = show && !isTrackedHandSource(controller2.userData.inputSource);
     }
 
+    function getCurrentHandModelStyleLabel() {
+      return HAND_MODEL_STYLES[currentHandModelStyleIndex].label;
+    }
+
     function updateHandVisuals() {
       const show = renderer.xr.isPresenting && showHandsInput.checked;
-      hand1.visible = show;
-      hand2.visible = show;
+
+      handRoots.forEach((handRoot, handIndex) => {
+        handRoot.visible = show;
+
+        handModels[handIndex].forEach((model, modelIndex) => {
+          model.visible = show && modelIndex === currentHandModelStyleIndex;
+        });
+      });
+    }
+
+    function cycleHandModelStyle(showMessage = true) {
+      currentHandModelStyleIndex = (currentHandModelStyleIndex + 1) % HAND_MODEL_STYLES.length;
+      updateHandVisuals();
+
+      if (showMessage) {
+        const styleName = getCurrentHandModelStyleLabel();
+        showARConfirmation(`HANDS: ${styleName.toUpperCase()}`);
+        setStatus(
+          `<span class="ok">Fake hand model changed to ${escapeHTML(styleName)}.</span>\n` +
+          `The two-fist gesture only changes the appearance of the tracked fake hands. The hands still cannot move, grab, push, scale, calibrate, clip, or press anything.`
+        );
+      }
     }
 
     function rememberControllerSide(controller, grip, ray, index, event) {
@@ -2287,7 +2452,10 @@
 
     arHideFloorInput.addEventListener("change", updateGrid);
     showControllersInput.addEventListener("change", updateControllerVisuals);
-    showHandsInput.addEventListener("change", updateHandVisuals);
+    showHandsInput.addEventListener("change", () => {
+      updateHandVisuals();
+      if (!showHandsInput.checked) resetBothFistGestureState();
+    });
     arFloorInput.addEventListener("change", () => reframeCurrentModel(false));
     floorUpBtn.addEventListener("click", () => nudgeXRFloor(0.10));
     floorDownBtn.addEventListener("click", () => nudgeXRFloor(-0.10));
@@ -2327,6 +2495,7 @@
       // Avoid carrying the normal desktop/orbit camera offset into XR.
       camera.position.set(0, 0, 0);
       cameraRig.position.set(0, 0, 0);
+      resetBothFistGestureState();
       updateControllerVisuals();
       updateHandVisuals();
 
@@ -2345,7 +2514,7 @@
 ` +
           `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands are visual-only and do nothing.`
+          `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Tracked fake hands can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls.`
         );
       } else {
         setStatus(
@@ -2353,7 +2522,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands are visual-only and do nothing. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Tracked fake hands can cycle appearance when both hands make a fist together, but cannot affect the OBJ or controls. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -2388,6 +2557,7 @@
       rightAButtonWasPressed = false;
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
+      resetBothFistGestureState();
       setMarkerOpacity(floorMarker, 0);
       setMarkerOpacity(ceilingMarker, 0);
       floorMarker.visible = false;
@@ -2408,6 +2578,7 @@
         autoDetectXRFloor();
         updateControllerVisuals();
         updateHandVisuals();
+        updateBothFistHandModelGesture(dt);
         updateMarkerReveal(dt);
         if (xrCutArmTimer > 0) {
           xrCutArmTimer = Math.max(0, xrCutArmTimer - dt);
@@ -2415,6 +2586,7 @@
       } else {
         markerRevealTimer = 0;
         xrCutArmTimer = 0;
+        resetBothFistGestureState();
       }
 
       if (arConfirmTimer > 0) {
