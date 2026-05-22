@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 50</title>
+  <title>Quest OBJ Viewer version 51</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 50</h1>
+        <h1>Quest OBJ Viewer version 51</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -419,6 +419,14 @@
 
       <div class="control">
         <div>
+          <b>Hold right grip: spatial wireframe guide</b><br />
+          <span>Hold the right controller grip to reveal a room-scale wireframe/grid aligned to the XR floor. In passthrough it is a spatial guide around the captured floor, not a scan of real walls or furniture.</span>
+        </div>
+        <input id="gripWireframeInput" type="checkbox" checked />
+      </div>
+
+      <div class="control">
+        <div>
           <b>Show tracked look-a-like hands in XR</b><br />
           <span>When Quest hand tracking is active, shows the realistic look-a-like hand models. Each hand disappears automatically when you pick up that side's controller. Apart from the optional left/right pinch interactions below, hands cannot affect the OBJ or controls.</span>
         </div>
@@ -524,7 +532,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Right controller B shows or hides the captured AR floor overlay after the floor has been detected or manually set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. Right controller B shows or hides the captured AR floor overlay after the floor has been detected or manually set. Hold the right controller grip to temporarily reveal a floor-aligned spatial wireframe guide; it is a visual guide, not reconstructed real-room geometry. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -565,6 +573,7 @@
     const gridInput = document.getElementById("gridInput");
     const moveInput = document.getElementById("moveInput");
     const showControllersInput = document.getElementById("showControllersInput");
+    const gripWireframeInput = document.getElementById("gripWireframeInput");
     const showHandsInput = document.getElementById("showHandsInput");
     const leftPinchCentreInput = document.getElementById("leftPinchCentreInput");
     const pinchMoveInput = document.getElementById("pinchMoveInput");
@@ -1262,6 +1271,13 @@
     controller1.addEventListener("selectstart", (event) => handleControllerTrigger(controller1, event));
     controller2.addEventListener("selectstart", (event) => handleControllerTrigger(controller2, event));
 
+    // Primary squeeze maps to the physical grip on the Quest controllers: show the
+    // environmental wireframe only while the right grip remains held.
+    controller1.addEventListener("squeezestart", (event) => handleGripWireframeStart(controller1, event));
+    controller2.addEventListener("squeezestart", (event) => handleGripWireframeStart(controller2, event));
+    controller1.addEventListener("squeezeend", (event) => handleGripWireframeEnd(controller1, event));
+    controller2.addEventListener("squeezeend", (event) => handleGripWireframeEnd(controller2, event));
+
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334466, 1.0);
     scene.add(hemiLight);
 
@@ -1370,6 +1386,97 @@
       material.depthWrite = false;
     });
     capturedFloorVisual.add(capturedFloorGrid);
+
+    // Hold-to-view spatial wireframe guide. Standard WebXR in this page can provide
+    // floor placement but does not expose a reconstructed mesh of real furniture or
+    // walls, so this deliberately draws a floor-aligned room-scale guide instead of
+    // falsely implying that the environment itself has been scanned.
+    const environmentWireframe = new THREE.Group();
+    environmentWireframe.name = "right_grip_spatial_wireframe_guide";
+    environmentWireframe.visible = false;
+    markerAnchorRoot.add(environmentWireframe);
+
+    const environmentFloorGrid = new THREE.GridHelper(6, 24, 0x7cc7ff, 0x3c9cda);
+    const environmentFloorGridMaterials = Array.isArray(environmentFloorGrid.material)
+      ? environmentFloorGrid.material
+      : [environmentFloorGrid.material];
+    environmentFloorGridMaterials.forEach((material) => {
+      material.transparent = true;
+      material.opacity = 0.76;
+      material.depthTest = false;
+      material.depthWrite = false;
+    });
+    environmentFloorGrid.renderOrder = 1100;
+    environmentWireframe.add(environmentFloorGrid);
+
+    const wireframeRoomHalfSize = 3.0;
+    const wireframeRoomHeight = 2.45;
+    const wireframeCagePoints = [];
+    function addWireframeEdge(ax, ay, az, bx, by, bz) {
+      wireframeCagePoints.push(new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz));
+    }
+
+    const wireframeCorners = [
+      [-wireframeRoomHalfSize, -wireframeRoomHalfSize],
+      [wireframeRoomHalfSize, -wireframeRoomHalfSize],
+      [wireframeRoomHalfSize, wireframeRoomHalfSize],
+      [-wireframeRoomHalfSize, wireframeRoomHalfSize]
+    ];
+    const wireframeLevels = [0, 1.0, 2.0, wireframeRoomHeight];
+
+    for (const level of wireframeLevels) {
+      for (let i = 0; i < wireframeCorners.length; i += 1) {
+        const start = wireframeCorners[i];
+        const end = wireframeCorners[(i + 1) % wireframeCorners.length];
+        addWireframeEdge(start[0], level, start[1], end[0], level, end[1]);
+      }
+    }
+
+    for (const corner of wireframeCorners) {
+      addWireframeEdge(corner[0], 0, corner[1], corner[0], wireframeRoomHeight, corner[1]);
+    }
+
+    const environmentCage = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(wireframeCagePoints),
+      new THREE.LineBasicMaterial({
+        color: 0x7cc7ff,
+        transparent: true,
+        opacity: 0.60,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+    environmentCage.renderOrder = 1101;
+    environmentWireframe.add(environmentCage);
+
+    const environmentScanGrid = new THREE.GridHelper(6, 24, 0x96f0b1, 0x96f0b1);
+    const environmentScanMaterials = Array.isArray(environmentScanGrid.material)
+      ? environmentScanGrid.material
+      : [environmentScanGrid.material];
+    environmentScanMaterials.forEach((material) => {
+      material.transparent = true;
+      material.opacity = 0.23;
+      material.depthTest = false;
+      material.depthWrite = false;
+    });
+    environmentScanGrid.renderOrder = 1102;
+    environmentWireframe.add(environmentScanGrid);
+
+    const environmentFloorTarget = new THREE.Mesh(
+      new THREE.RingGeometry(0.23, 0.25, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x96f0b1,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.94,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+    environmentFloorTarget.rotation.x = -Math.PI / 2;
+    environmentFloorTarget.position.y = 0.006;
+    environmentFloorTarget.renderOrder = 1103;
+    environmentWireframe.add(environmentFloorTarget);
 
     const ceilingMarker = new THREE.Group();
     ceilingMarker.visible = false;
@@ -1481,6 +1588,14 @@
     let capturedFloorAvailable = false;
     let capturedFloorVisible = false;
     let rightBButtonWasPressed = false;
+
+    // WebXR primary squeeze is mapped to the controller grip on Quest. Events are
+    // preferred, with a standard-gamepad button fallback for browser/controller
+    // combinations that expose the grip value without dispatching squeeze events.
+    let rightGripEventHeld = false;
+    let rightGripButtonHeld = false;
+    let rightGripButtonWasPressed = false;
+    let environmentWireframeScanTime = 0;
 
     // Fixed marker anchors stored in markerAnchorRoot local space.
     // These are changed only when you set/nudge the floor or ceiling.
@@ -2124,6 +2239,65 @@
       // of OBJ movement, height adjustments, rotation and hand interactions.
       capturedFloorVisual.position.copy(floorMarkerWorldPosition);
       capturedFloorVisual.updateMatrixWorld(true);
+    }
+
+    function updateEnvironmentWireframe(dt = 0) {
+      const shouldShow =
+        renderer.xr.isPresenting &&
+        gripWireframeInput.checked &&
+        (rightGripEventHeld || rightGripButtonHeld);
+
+      environmentWireframe.visible = shouldShow;
+      if (!shouldShow) return;
+
+      // Reuse the fixed tracking-space floor anchor so moving/rotating the OBJ can
+      // never drag this guide around with it. The tiny lift prevents z-fighting.
+      environmentWireframe.position.copy(floorMarkerWorldPosition);
+      environmentWireframe.position.y -= 0.002;
+
+      environmentWireframeScanTime = (environmentWireframeScanTime + dt) % 2.2;
+      const scanFraction = environmentWireframeScanTime / 2.2;
+      environmentScanGrid.position.y = 0.025 + scanFraction * (wireframeRoomHeight - 0.05);
+
+      environmentWireframe.updateMatrixWorld(true);
+    }
+
+    function setRightGripWireframeEventHeld(held, showMessage = true) {
+      const wasVisible = environmentWireframe.visible;
+      rightGripEventHeld = held;
+      updateEnvironmentWireframe(0);
+
+      if (showMessage && !wasVisible && environmentWireframe.visible) {
+        showARConfirmation("SPATIAL WIREFRAME GUIDE");
+      }
+    }
+
+    function hideEnvironmentWireframe() {
+      rightGripEventHeld = false;
+      rightGripButtonHeld = false;
+      rightGripButtonWasPressed = false;
+      environmentWireframeScanTime = 0;
+      environmentWireframe.visible = false;
+    }
+
+    function handleGripWireframeStart(controller, event = null) {
+      if (!renderer.xr.isPresenting || !gripWireframeInput.checked) return;
+
+      const inputSource = event?.data || controller?.userData?.inputSource || null;
+      if (isTrackedHandSource(inputSource)) return;
+
+      const handedness = inputSource?.handedness || controller?.userData?.handedness || "unknown";
+      if (handedness !== "right") return;
+
+      setRightGripWireframeEventHeld(true, true);
+    }
+
+    function handleGripWireframeEnd(controller, event = null) {
+      const inputSource = event?.data || controller?.userData?.inputSource || null;
+      const handedness = inputSource?.handedness || controller?.userData?.handedness || "unknown";
+      if (handedness !== "right") return;
+
+      setRightGripWireframeEventHeld(false, false);
     }
 
     function toggleCapturedFloor(showMessage = true) {
@@ -2816,6 +2990,12 @@
       return isGamepadButtonPressed(gamepad, 5);
     }
 
+    function isRightGripButtonPressed(gamepad) {
+      // Fallback for runtimes that expose the primary squeeze through xr-standard
+      // gamepad button 1 but do not reliably send squeeze events.
+      return isGamepadButtonPressed(gamepad, 1, 0.15);
+    }
+
     function armXRClipSetting(showMessage = true) {
       if (!renderer.xr.isPresenting) return;
 
@@ -2937,6 +3117,16 @@
         if (source.handedness === "right") {
           sawRightController = true;
 
+          // Right grip holds the spatial wireframe guide. Polling is retained as a
+          // fallback alongside squeezestart/squeezeend for Quest browser variations.
+          const gripPressed = isRightGripButtonPressed(gp);
+          rightGripButtonHeld = gripPressed;
+          if (gripPressed && !rightGripButtonWasPressed && !environmentWireframe.visible) {
+            showARConfirmation("SPATIAL WIREFRAME GUIDE");
+          }
+          rightGripButtonWasPressed = gripPressed;
+          updateEnvironmentWireframe(0);
+
           // Right-controller B toggles a broad captured-floor overlay in AR only.
           // It does not alter the detected floor height or reposition the OBJ.
           const bPressed = isRightBButtonPressed(gp);
@@ -2974,6 +3164,7 @@
         rightStickWasPressed = false;
         rightAButtonWasPressed = false;
         rightBButtonWasPressed = false;
+        hideEnvironmentWireframe();
       }
 
       if (!sawLeftController) {
@@ -3064,6 +3255,13 @@
 
     arHideFloorInput.addEventListener("change", updateGrid);
     showControllersInput.addEventListener("change", updateControllerVisuals);
+    gripWireframeInput.addEventListener("change", () => {
+      if (!gripWireframeInput.checked) {
+        hideEnvironmentWireframe();
+      } else {
+        updateEnvironmentWireframe(0);
+      }
+    });
     showHandsInput.addEventListener("change", updateHandVisuals);
     leftPinchCentreInput.addEventListener("change", () => {
       if (!leftPinchCentreInput.checked) stopLeftPinchCentrePlacement(true);
@@ -3106,6 +3304,7 @@
       capturedFloorAvailable = false;
       capturedFloorVisible = false;
       rightBButtonWasPressed = false;
+      hideEnvironmentWireframe();
       updateCapturedFloorVisual();
 
       if (!isPassthroughAR) {
@@ -3138,7 +3337,7 @@
 ` +
           `If automatic placement needs correcting, use the manual floor override with the left controller and right-controller A + trigger. To set an AR ceiling cut, hold the left controller at the desired cut height and confirm in the same way.
 ` +
-          `After the floor is captured, press right-controller <b>B</b> to show or hide its translucent floor overlay. Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
+          `After the floor is captured, press right-controller <b>B</b> to show or hide its translucent floor overlay. Hold the <b>right grip</b> to view a floor-aligned spatial wireframe guide (not real-room scanned geometry). Left stick moves only the OBJ horizontally. Pinch the left hand to place its centre, or pinch the right hand to move it freely.`
         );
       } else {
         setStatus(
@@ -3146,7 +3345,7 @@
 ` +
           `Ceiling cut/clipping is disabled in VR. Put the <b>left controller</b> on the floor, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
 ` +
-          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
+          `The green floor marker and virtual floor stay fixed in XR tracking space, not the OBJ. It fades out after being shown; press left Y to reveal it again. Hold the <b>right grip</b> to view the floor-aligned spatial wireframe guide. Left stick moves only the OBJ horizontally. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed floor marker. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. Use <b>Enter Passthrough</b> for AR ceiling clipping.`
         );
       }
     });
@@ -3185,6 +3384,7 @@
       capturedFloorAvailable = false;
       capturedFloorVisible = false;
       capturedFloorVisual.visible = false;
+      hideEnvironmentWireframe();
       markerRevealTimer = 0;
       xrCutArmTimer = 0;
       setMarkerOpacity(floorMarker, 0);
@@ -3217,6 +3417,7 @@
         updateRightHandPinchMove();
         updateFingertipMeasurement();
         updateMarkerReveal(dt);
+        updateEnvironmentWireframe(dt);
         if (xrCutArmTimer > 0) {
           xrCutArmTimer = Math.max(0, xrCutArmTimer - dt);
         }
@@ -3226,6 +3427,7 @@
         hideFingertipMeasurement();
         stopLeftPinchCentrePlacement(false);
         stopRightPinchMove(false);
+        hideEnvironmentWireframe();
         }
 
       if (arConfirmTimer > 0) {
