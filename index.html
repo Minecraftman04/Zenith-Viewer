@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Quest OBJ Viewer version 52</title>
+  <title>Quest OBJ Viewer version 53</title>
 
   <style>
     :root {
@@ -306,7 +306,7 @@
   <div id="ui">
     <div class="topbar">
       <div>
-        <h1>Quest OBJ Viewer version 52</h1>
+        <h1>Quest OBJ Viewer version 53</h1>
         <div class="sub">Designed for <b>Zenith 1.obj</b> exported in <b>mm</b></div>
       </div>
       <button id="collapseBtn" class="small" title="Hide/show controls">Hide</button>
@@ -495,7 +495,7 @@
       <div class="control">
         <div>
           <b>AR floor placement</b><br />
-          <span>In passthrough, keep the bottom of the model on the calibrated floor. No head-height value is needed.</span>
+          <span>In passthrough, keep the bottom of the model on the calibrated floor. To put the OBJ at a real floor position, place the <b>left controller</b> there, then hold <b>A</b> and squeeze the <b>right grip</b>. The model base and horizontal centre are placed at that point.</span>
         </div>
         <input id="arFloorInput" type="checkbox" checked />
       </div>
@@ -503,7 +503,7 @@
       <div class="control">
         <div>
           <b>XR floor calibration</b><br />
-          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. You can also nudge the floor up/down. In VR this is the only cut/height calibration.</span>
+          <span>If the floor is wrong in VR/AR, put the <b>left controller</b> on the real floor, then press/hold <b>A</b> on the right controller and press the <b>right trigger</b>. In <b>AR only</b>, hold <b>A</b> and squeeze the <b>right grip</b> instead to set the floor and place the OBJ at the left controller position. You can also nudge the floor up/down.</span>
         </div>
         <div class="row" style="justify-content:flex-end;margin:0;">
           <button id="floorUpBtn" class="small" type="button">Floor +10 cm</button>
@@ -546,7 +546,7 @@
 
       <div class="hint">
         Touch/drag to rotate outside VR. Scroll to zoom.
-        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. With Touch controllers, squeeze and hold both grip buttons to draw a live measurement between amber probe tips positioned 10 cm in front of each controller; place those tips on object edges or surfaces, then read the distance in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
+        Use Enter VR for a virtual room, or Enter Passthrough for Quest AR/passthrough. In AR, put the left controller on the real floor where the OBJ should stand, then hold A and squeeze the right controller grip to place the model base and horizontal centre at that floor point. In VR and AR/passthrough, pinch the left thumb and index fingertip together to put the centre of the OBJ exactly at that pinch point and carry it while held, or pinch with the right hand to move the OBJ freely; open the pinch to release it. The floor and XR tracking space stay fixed. The left stick moves only the OBJ horizontally. Right stick rolls the rocket around its engine-to-nose-cone axis, right stick up/down adjusts model height, and right-stick click resets only the OBJ height back to the calibrated floor. Put the left controller at the calibration height, hold A on the right controller, and press the right trigger to set the floor or AR ceiling cut. Controller visuals are attached to the headset XR rig, not the OBJ. With Quest hand tracking, the realistic look-a-like hands follow your real hands and disappear automatically as soon as the matching controller becomes active. Apart from the enabled left/right pinch placement actions, they cannot affect the OBJ or controls. Point with both hands: keep each index finger extended and fold the thumb, middle, ring and little fingers to display the live fingertip-to-fingertip measurement in millimetres. With Touch controllers, squeeze and hold both grip buttons to draw a live measurement between amber probe tips positioned 10 cm in front of each controller; place those tips on object edges or surfaces, then read the distance in millimetres. Left controller X toggles AR cut-off clipping on/off after an AR ceiling is set. No controller-mounted UI panel is included.
       </div>
     </div>
   </div>
@@ -1822,6 +1822,7 @@
     const modelHorizontalOffset = new THREE.Vector3(0, 0, 0); // VR/AR left-stick OBJ movement in metres; floor/grid remain static.
     let modelVerticalOffset = 0; // Extra up/down movement from the right thumbstick.
     let rightStickWasPressed = false;
+    let rightGripPlacementWasPressed = false;
     let leftXButtonWasPressed = false;
     let autoSpinAxis = "z";
     let autoVerticalAxis = "z";
@@ -2787,6 +2788,101 @@
       setXRFloorFromWorldPosition(controllerPos, "Left controller");
     }
 
+    function placeOBJOnARFloorFromLeftController(triggeringController = null) {
+      if (!renderer.xr.isPresenting) return;
+
+      if (!isPassthroughAR) {
+        showARConfirmation("AR ONLY");
+        setStatus(
+          `<span class="err">Floor-position OBJ placement is available in passthrough/AR only.</span>\n` +
+          `Enter passthrough, place the left controller on the real floor where the OBJ should stand, then hold right-controller <b>A</b> and squeeze the <b>right grip</b>.`
+        );
+        return;
+      }
+
+      if (!currentObject) {
+        showARConfirmation("LOAD OBJ FIRST");
+        setStatus(
+          `<span class="err">No OBJ is loaded.</span>\n` +
+          `Load an OBJ first, then place the left controller on the floor, hold right-controller <b>A</b> and squeeze the <b>right grip</b>.`
+        );
+        return;
+      }
+
+      let leftObject = getControllerObjectByHand("left", true);
+
+      // Fall back to the non-triggering controller only if handedness has not
+      // been published by the XR runtime yet.
+      if (!leftObject && triggeringController) {
+        leftObject = getAnyControllerObjectExcept(triggeringController);
+      }
+
+      if (!leftObject) {
+        setStatus(
+          `<span class="err">Could not find the left controller.</span>\n` +
+          `Make sure both Quest controllers are awake, put the left one on the real floor where the OBJ should stand, then hold A and squeeze the right grip.`
+        );
+        return;
+      }
+
+      leftObject.updateMatrixWorld(true);
+      controllerPos.setFromMatrixPosition(leftObject.matrixWorld);
+
+      const xrCam = renderer.xr.getCamera(camera);
+      xrCam.getWorldPosition(xrCamPos);
+
+      if (!Number.isFinite(controllerPos.x) || !Number.isFinite(controllerPos.y) || !Number.isFinite(controllerPos.z)) {
+        setStatus(
+          `<span class="err">Left controller position was not available.</span>\n` +
+          `Move both controllers slightly, then hold A and squeeze the right grip again.`
+        );
+        return;
+      }
+
+      // Protect against a placement being fired while the left controller is
+      // accidentally being held in mid-air.
+      if (Number.isFinite(xrCamPos.y) && controllerPos.y > xrCamPos.y - 0.70) {
+        showARConfirmation("LEFT CONTROLLER TOO HIGH");
+        setStatus(
+          `<span class="err">The left controller was not low enough to place the OBJ on the floor.</span>\n` +
+          `Put it on the real floor where the model should stand, then hold A and squeeze the right grip again.`
+        );
+        return;
+      }
+
+      // Use the same real controller point for floor height and horizontal placement.
+      // applyModelTransform() centres the model in X/Z before applying these offsets,
+      // so the base centre lands directly at the left-controller floor position.
+      xrFloorY = controllerPos.y;
+      savedFloorCutY = controllerPos.y;
+      xrFloorMarkerX = controllerPos.x;
+      xrFloorMarkerZ = controllerPos.z;
+      setFloorMarkerAnchorFromWorld(controllerPos.x, savedFloorCutY, controllerPos.z);
+      xrFloorManual = true;
+      xrFloorAutoSet = true;
+
+      stopLeftPinchCentrePlacement(false);
+      stopRightPinchMove(false);
+      modelHorizontalOffset.x = controllerPos.x;
+      modelHorizontalOffset.z = controllerPos.z;
+      modelHorizontalOffset.y = 0;
+      modelVerticalOffset = 0;
+
+      // This gesture is distinct from A + right trigger; do not leave its
+      // one-shot calibration arming window active after successful placement.
+      xrCutArmTimer = 0;
+
+      applyXRFloorPlacement();
+      triggerMarkerReveal(false);
+      showARConfirmation("OBJ PLACED ON FLOOR");
+
+      setStatus(
+        `<span class="ok">OBJ placed on the AR floor.</span>\n` +
+        `The left controller point is now the calibrated floor and the horizontal centre of the model base. Hold <b>A</b> and squeeze the <b>right grip</b> again to relocate it.\n` +
+        `A + right trigger still sets the floor or AR ceiling cut without this location-placement action.`
+      );
+    }
+
     function calibrateXRCeilingFromLeftController(triggeringController = null) {
       if (!renderer.xr.isPresenting) return;
 
@@ -3131,6 +3227,16 @@
           }
           rightAButtonWasPressed = aPressed;
 
+          // New passthrough placement action: putting the left controller on the
+          // real floor and squeezing the right grip while A is held moves the OBJ
+          // base/centre to that exact floor point. Trigger calibration stays separate.
+          const gripPressed = isGamepadButtonPressed(gp, 1, 0.55);
+          if (isPassthroughAR && aPressed && gripPressed && !rightGripPlacementWasPressed) {
+            const rightControllerObject = getControllerObjectByHand("right", false);
+            placeOBJOnARFloorFromLeftController(rightControllerObject);
+          }
+          rightGripPlacementWasPressed = gripPressed;
+
           // Right thumbstick left/right rolls the model around its own length axis.
           rotateModelFromRightStick(x, dt);
 
@@ -3149,6 +3255,7 @@
 
       if (!sawRightController) {
         rightStickWasPressed = false;
+        rightGripPlacementWasPressed = false;
         rightAButtonWasPressed = false;
       }
 
@@ -3308,7 +3415,9 @@
         setStatus(
           `<span class="ok">Passthrough/AR mode active.</span>
 ` +
-          `Put the <b>left controller</b> on the floor or at the ceiling/cut height, then press/hold right-controller <b>A</b> and press the <b>right trigger</b>.
+          `To place the OBJ on your real floor: put the <b>left controller</b> where the model should stand, hold right-controller <b>A</b>, then squeeze the <b>right grip</b>. The model base/centre moves to that point.
+` +
+          `To set only a floor or ceiling cut: put the left controller at the height, then press/hold <b>A</b> and press the <b>right trigger</b>.
 ` +
           `Green/red markers are fixed to the XR tracking space, not the OBJ. They fade out after being shown; press left Y to reveal them again. Left stick moves only the OBJ horizontally in AR/passthrough. Realistic look-a-like hands disappear when a matching controller becomes active. Pinch the left thumb and index fingertip together to put the OBJ centre at the pinch point and carry it, or pinch with the right hand to move the OBJ freely; open a pinch to release. Neither action moves the fixed markers or cuts. Point with both hands using only the index fingers, with all other fingers folded, to show their separation in mm. With controllers active, squeeze and hold both grip buttons to measure between amber tips 10 cm in front of the controllers; place the tips against object surfaces to read the distance in mm.`
         );
@@ -3348,6 +3457,7 @@
       xrFloorAutoSet = false;
       xrFloorManual = false;
       rightStickWasPressed = false;
+      rightGripPlacementWasPressed = false;
       leftXButtonWasPressed = false;
       leftYButtonWasPressed = false;
       rightAButtonWasPressed = false;
